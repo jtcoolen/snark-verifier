@@ -1,0 +1,29 @@
+{
+  "profile_id": "poseidon-v1",
+  "protocol_version": "midnight-proofs-0.3",
+  "transcript": {
+    "name": "Poseidon",
+    "truncate_challenges": true,
+    "challenge_bits": 128,
+    "domain_separator": "midnight.poseidon.v1"
+  },
+  "pcs": {
+    "scheme": "KZG",
+    "curve": "BLS12-381",
+    "srs_hash": "srs:<fill>"
+  },
+  "circuit": {
+    "circuit_id": "poseidon_example",
+    "trash_mode": "additive_selectors_v1",
+    "committed_instances": false
+  },
+  "expected": {
+    "vk_hash": "vk:<fill>",
+    "proof_len_bytes": 0,
+    "instance_column_lens": [
+      0
+    ],
+    "num_queries": 0,
+    "num_evaluations": 0
+  }
+}

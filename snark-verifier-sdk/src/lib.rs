@@ -29,6 +29,14 @@ pub use snark_verifier;
 pub mod evm;
 #[cfg(feature = "loader_halo2")]
 pub mod halo2;
+pub mod midnight;
+pub mod midnight_adapter;
+pub mod midnight_bridge;
+#[cfg(all(feature = "loader_halo2", feature = "loader_evm"))]
+pub mod midnight_bridge_artifacts;
+pub mod midnight_bridge_build;
+pub mod midnight_protocol_bridge;
+pub mod midnight_vk;
 
 // For BLS12-381 base field arithmetic over Fr in halo2-ecc, limb bits must satisfy:
 // BITS + Fr::NUM_BITS - Fq::NUM_BITS - 2 >= 0. With Fr=255 and Fq=381 this means BITS >= 128.

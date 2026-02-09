@@ -167,7 +167,12 @@ fn main() {
     let lookup_bits = k as usize - 1;
     let mut agg_circuit = AggregationCircuit::new::<SHPLONK>(
         CircuitBuilderStage::Keygen,
-        AggregationConfigParams { degree: k, lookup_bits, ..Default::default() },
+        AggregationConfigParams {
+            degree: k,
+            num_advice: 16,
+            lookup_bits,
+            ..Default::default()
+        },
         &params,
         vec![dummy_snark],
         VerifierUniversality::Full,

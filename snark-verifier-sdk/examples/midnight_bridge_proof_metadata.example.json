@@ -1,0 +1,25 @@
+{
+  "profile_id": "midnight-bridge-keccak-v1",
+  "protocol_version": "midnight-proofs-0.3",
+  "transcript": {
+    "name": "Keccak",
+    "truncate_challenges": false,
+    "challenge_bits": null,
+    "domain_separator": "Domain separator for transcript"
+  },
+  "pcs": {
+    "scheme": "KZG",
+    "curve": "BLS12-381",
+    "srs_hash": "REPLACE_ME",
+    "vk_hash": "REPLACE_ME"
+  },
+  "circuit": {
+    "circuit_id": "poseidon_example",
+    "trash_mode": "none",
+    "committed_instances": false
+  },
+  "proof_len_bytes": 0,
+  "instance_column_lens": [1],
+  "num_queries": null,
+  "num_evaluations": null
+}
