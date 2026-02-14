@@ -8,7 +8,9 @@ pub mod compact_ir;
 pub(crate) mod loader;
 pub(crate) mod util;
 
-pub use code::EvmCodegenMode;
+pub use code::{
+    EvmCodegenMode, UnrolledShardedProgramManifest, UnrolledShardedVerifierArtifacts,
+};
 pub use compact_codegen::{
     build_compact_verifier_artifacts, data_page_deployment_code, encode_compact_constructor_args,
     CompactVerifierArtifacts,
@@ -21,4 +23,9 @@ pub use util::{
     Address, B256, U256, U512,
 };
 #[cfg(feature = "revm")]
-pub use util::{deploy_and_call, deploy_compact_and_call};
+pub use util::{
+    deploy_and_call, deploy_and_call_with_metrics, deploy_compact_and_call,
+    deploy_compact_and_call_with_metrics, deploy_unrolled_sharded_and_call,
+    deploy_unrolled_sharded_and_call_with_metrics, CompactExecutionMetrics, EvmExecutionMetrics,
+    UnrolledShardedExecutionMetrics,
+};

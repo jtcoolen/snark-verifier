@@ -1,12 +1,16 @@
 use crate::{
     loader::{
         evm::{
-            code::{EvmCodegenMode, Precompiled, SolidityAssemblyCode},
+            code::{
+                EvmCodegenMode, Precompiled, SolidityAssemblyCode,
+                UnrolledShardedProgramManifest, UnrolledShardedVerifierArtifacts,
+            },
             compact_codegen::{build_compact_verifier_artifacts, CompactVerifierArtifacts},
             compact_ir::{
                 CompactInstruction, CompactOperand, CompactProgram, CompactProgramBuilder,
             },
-            fe_to_u256, modulus, u256_to_fe, U256, U512,
+            compile_solidity, compile_solidity_runtime, fe_to_u256, modulus, u256_to_fe, U256,
+            U512,
         },
         EcPointLoader, LoadedEcPoint, LoadedScalar, Loader, ScalarLoader,
     },
@@ -22,6 +26,7 @@ use std::{
     fmt::{self, Debug},
     iter,
     ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
+    panic::{catch_unwind, AssertUnwindSafe},
     rc::Rc,
 };
 
@@ -32,6 +37,15 @@ const BLS_G1_BYTES: usize = 2 * BLS_ENCODED_FP_BYTES;
 const BLS_G2_BYTES: usize = 4 * BLS_ENCODED_FP_BYTES;
 const PROOF_COMPRESSED_SIGN_BYTES: usize = 0x01;
 const COMPRESSED_SCRATCH_MODEXP_BYTES: usize = 0x120;
+const EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES: usize = 24_576;
+const EVM_INITCODE_SIZE_LIMIT_BYTES: usize = 49_152;
+const SHARDED_INITIAL_GROUP_SIZE: usize = 64;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ShardStatementRange {
+    start: usize,
+    end: usize,
+}
 
 #[derive(Clone, Debug)]
 pub enum Value<T> {
@@ -70,6 +84,7 @@ pub struct EvmLoader {
     compressed_modexp_input_ptr: usize,
     compressed_rhs_ptr: usize,
     compressed_y_sq_ptr: usize,
+    invert_modexp_input_ptr: RefCell<Option<usize>>,
     code: RefCell<SolidityAssemblyCode>,
     compact_program: RefCell<CompactProgramBuilder>,
     ptr: RefCell<usize>,
@@ -78,6 +93,111 @@ pub struct EvmLoader {
 
 fn hex_encode_u256(value: &U256) -> String {
     format!("0x{}", hex::encode(value.to_be_bytes::<32>()))
+}
+
+fn unrolled_shard_contract_name(index: usize) -> String {
+    format!("Halo2VerifierShard{index}")
+}
+
+fn build_unrolled_shard_solidity(
+    contract_name: &str,
+    scalar_modulus: U256,
+    success_slot: usize,
+    body: &str,
+) -> String {
+    format!(
+        r#"
+// SPDX-License-Identifier: MIT
+
+pragma solidity 0.8.30;
+
+contract {contract_name} {{
+    fallback(bytes calldata) external returns (bytes memory) {{
+        assembly ("memory-safe") {{
+            let data := mload(0x40)
+            if iszero(eq(data, 0x80)) {{
+                revert(0, 0)
+            }}
+
+            let success := mload({success_slot:#x})
+            let f_q := {scalar_modulus}
+{body}
+            mstore({success_slot:#x}, success)
+            return(0, 0)
+        }}
+    }}
+}}
+"#,
+        scalar_modulus = hex_encode_u256(&scalar_modulus),
+    )
+}
+
+fn build_unrolled_dispatcher_solidity(success_slot: usize) -> String {
+    // `shards` is the first state variable and occupies storage slot 0.
+    // Dynamic-array element base slot is `keccak256(abi.encode(slot))`.
+    format!(
+        r#"
+// SPDX-License-Identifier: MIT
+
+pragma solidity 0.8.30;
+
+contract Halo2VerifierDispatcher {{
+    address[] private shards;
+
+    constructor(address[] memory _shards) {{
+        shards = _shards;
+    }}
+
+    fallback(bytes calldata) external returns (bytes memory) {{
+        assembly ("memory-safe") {{
+            let data := mload(0x40)
+            if iszero(eq(data, 0x80)) {{
+                revert(0, 0)
+            }}
+
+            mstore({success_slot:#x}, 1)
+
+            let len := sload(0)
+            mstore(0x00, 0)
+            let base := keccak256(0x00, 0x20)
+
+            for {{ let i := 0 }} lt(i, len) {{ i := add(i, 1) }} {{
+                mstore(0x40, 0x80)
+                let shard := and(
+                    sload(add(base, i)),
+                    0x000000000000000000000000ffffffffffffffffffffffffffffffffffffffff
+                )
+                if iszero(delegatecall(gas(), shard, 0, calldatasize(), 0, 0)) {{
+                    returndatacopy(0, 0, returndatasize())
+                    revert(0, returndatasize())
+                }}
+            }}
+
+            if iszero(mload({success_slot:#x})) {{
+                revert(0, 0)
+            }}
+            return(0, 0)
+        }}
+    }}
+}}
+"#
+    )
+}
+
+fn try_compile_solidity_sizes(solidity: &str) -> Option<(Vec<u8>, Vec<u8>)> {
+    let deployment =
+        catch_unwind(AssertUnwindSafe(|| compile_solidity(solidity))).ok()?;
+    let runtime =
+        catch_unwind(AssertUnwindSafe(|| compile_solidity_runtime(solidity))).ok()?;
+    Some((deployment, runtime))
+}
+
+fn join_statement_blocks(
+    blocks: &[String],
+    start: usize,
+    end: usize,
+) -> String {
+    blocks[start..end].iter().map(String::as_str).join("\n")
 }
 
 fn be_bytes_to_u256(bytes: &[u8]) -> U256 {
@@ -156,6 +276,7 @@ impl EvmLoader {
             compressed_modexp_input_ptr,
             compressed_rhs_ptr,
             compressed_y_sq_ptr,
+            invert_modexp_input_ptr: RefCell::new(None),
             code: RefCell::new(code),
             compact_program: RefCell::new(CompactProgramBuilder::new()),
             ptr: RefCell::new(ptr),
@@ -178,6 +299,9 @@ impl EvmLoader {
                 self.code.borrow_mut().runtime_append(code);
                 self.code.borrow().code(hex_encode_u256(&self.scalar_modulus))
             }
+            EvmCodegenMode::UnrolledSharded => {
+                self.unrolled_sharded_verifier_artifacts().dispatcher_solidity
+            }
             EvmCodegenMode::Compact | EvmCodegenMode::Hybrid => {
                 self.compact_verifier_artifacts().runtime_solidity
             }
@@ -191,6 +315,10 @@ impl EvmLoader {
 
     fn is_compact_codegen(&self) -> bool {
         matches!(self.codegen_mode, EvmCodegenMode::Compact | EvmCodegenMode::Hybrid)
+    }
+
+    fn is_unrolled_codegen(&self) -> bool {
+        matches!(self.codegen_mode, EvmCodegenMode::Unrolled | EvmCodegenMode::UnrolledSharded)
     }
 
     fn is_hybrid_codegen(&self) -> bool {
@@ -209,7 +337,222 @@ impl EvmLoader {
             "compact verifier artifacts are only available in compact/hybrid mode"
         );
         let program = self.compact_program.borrow().encode();
-        build_compact_verifier_artifacts(self.scalar_modulus, &program, self.ptr())
+        build_compact_verifier_artifacts(
+            self.scalar_modulus,
+            self.base_modulus_words,
+            self.base_sqrt_exp_words,
+            &program,
+            self.ptr(),
+        )
+    }
+
+    /// Returns unrolled-sharded verifier dispatcher plus shard artifacts.
+    pub fn unrolled_sharded_verifier_artifacts(&self) -> UnrolledShardedVerifierArtifacts {
+        assert!(
+            self.codegen_mode == EvmCodegenMode::UnrolledSharded,
+            "unrolled-sharded verifier artifacts are only available in unrolled-sharded mode"
+        );
+
+        let statement_blocks = self.code.borrow().runtime_blocks().to_vec();
+        assert!(
+            !statement_blocks.is_empty(),
+            "unrolled-sharded verifier generation requires at least one emitted statement block"
+        );
+
+        let success_slot = self.ptr() + 0x20;
+        let total_statements = statement_blocks.len();
+
+        // Build initial grouped ranges to keep compile-search tractable.
+        let mut grouped_ranges = Vec::new();
+        let mut start = 0usize;
+        while start < total_statements {
+            let end = (start + SHARDED_INITIAL_GROUP_SIZE).min(total_statements);
+            grouped_ranges.push(ShardStatementRange { start, end });
+            start = end;
+        }
+
+        let mut shards = Vec::new();
+        let mut cursor = 0usize;
+        while cursor < grouped_ranges.len() {
+            // Ensure at least one grouped range fits; bisect until it does.
+            loop {
+                let single = grouped_ranges[cursor];
+                let body = join_statement_blocks(&statement_blocks, single.start, single.end);
+                let shard_solidity = build_unrolled_shard_solidity(
+                    "Halo2VerifierShardCandidate",
+                    self.scalar_modulus,
+                    success_slot,
+                    &body,
+                );
+                let Some((deployment, runtime)) = try_compile_solidity_sizes(&shard_solidity) else {
+                    if single.end - single.start <= 1 {
+                        panic!(
+                            "failed to compile unrolled-sharded candidate for statement range [{}..{})",
+                            single.start, single.end
+                        );
+                    }
+                    let mid = single.start + (single.end - single.start) / 2;
+                    grouped_ranges.splice(
+                        cursor..=cursor,
+                        [
+                            ShardStatementRange {
+                                start: single.start,
+                                end: mid,
+                            },
+                            ShardStatementRange {
+                                start: mid,
+                                end: single.end,
+                            },
+                        ],
+                    );
+                    continue;
+                };
+                if runtime.len() <= EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES
+                    && deployment.len() <= EVM_INITCODE_SIZE_LIMIT_BYTES
+                {
+                    break;
+                }
+                if single.end - single.start <= 1 {
+                    panic!(
+                        "single statement range [{}..{}) exceeds EVM limits: runtime={} initcode={}",
+                        single.start,
+                        single.end,
+                        runtime.len(),
+                        deployment.len()
+                    );
+                }
+                let mid = single.start + (single.end - single.start) / 2;
+                grouped_ranges.splice(
+                    cursor..=cursor,
+                    [
+                        ShardStatementRange {
+                            start: single.start,
+                            end: mid,
+                        },
+                        ShardStatementRange {
+                            start: mid,
+                            end: single.end,
+                        },
+                    ],
+                );
+            }
+
+            // Binary-search the largest contiguous grouped range that still fits.
+            let mut lo = cursor + 1;
+            let mut hi = grouped_ranges.len() + 1;
+            while lo + 1 < hi {
+                let mid = (lo + hi) / 2;
+                let stmt_start = grouped_ranges[cursor].start;
+                let stmt_end = grouped_ranges[mid - 1].end;
+                let body = join_statement_blocks(&statement_blocks, stmt_start, stmt_end);
+                let shard_solidity = build_unrolled_shard_solidity(
+                    "Halo2VerifierShardCandidate",
+                    self.scalar_modulus,
+                    success_slot,
+                    &body,
+                );
+                let fits = try_compile_solidity_sizes(&shard_solidity)
+                    .map(|(deployment, runtime)| {
+                        runtime.len() <= EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES
+                            && deployment.len() <= EVM_INITCODE_SIZE_LIMIT_BYTES
+                    })
+                    .unwrap_or(false);
+                if fits {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+
+            let stmt_start = grouped_ranges[cursor].start;
+            let stmt_end = grouped_ranges[lo - 1].end;
+            shards.push(ShardStatementRange {
+                start: stmt_start,
+                end: stmt_end,
+            });
+            cursor = lo;
+        }
+
+        let mut shard_solidity_sources = Vec::with_capacity(shards.len());
+        let mut shard_deployment_codes = Vec::with_capacity(shards.len());
+        let mut shard_runtime_codes = Vec::with_capacity(shards.len());
+        let mut shard_statement_start_indices = Vec::with_capacity(shards.len());
+        let mut shard_statement_end_indices = Vec::with_capacity(shards.len());
+
+        for (idx, range) in shards.iter().enumerate() {
+            let body = join_statement_blocks(&statement_blocks, range.start, range.end);
+            let contract_name = unrolled_shard_contract_name(idx);
+            let solidity = build_unrolled_shard_solidity(
+                &contract_name,
+                self.scalar_modulus,
+                success_slot,
+                &body,
+            );
+            let (deployment_code, runtime_code) = try_compile_solidity_sizes(&solidity).unwrap_or_else(|| {
+                panic!(
+                    "failed to compile finalized unrolled-sharded contract {contract_name} for statement range [{}..{})",
+                    range.start, range.end
+                )
+            });
+            assert!(
+                runtime_code.len() <= EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES,
+                "unrolled-sharded shard runtime exceeds EIP-170 limit: {} > {}",
+                runtime_code.len(),
+                EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES
+            );
+            assert!(
+                deployment_code.len() <= EVM_INITCODE_SIZE_LIMIT_BYTES,
+                "unrolled-sharded shard initcode exceeds EIP-3860 limit: {} > {}",
+                deployment_code.len(),
+                EVM_INITCODE_SIZE_LIMIT_BYTES
+            );
+
+            shard_solidity_sources.push(solidity);
+            shard_deployment_codes.push(deployment_code);
+            shard_runtime_codes.push(runtime_code);
+            shard_statement_start_indices.push(range.start);
+            shard_statement_end_indices.push(range.end);
+        }
+
+        let dispatcher_solidity = build_unrolled_dispatcher_solidity(success_slot);
+        let (dispatcher_deployment_code, dispatcher_runtime_code) = try_compile_solidity_sizes(
+            &dispatcher_solidity,
+        )
+        .expect("failed to compile unrolled-sharded dispatcher Solidity");
+        assert!(
+            dispatcher_runtime_code.len() <= EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES,
+            "unrolled-sharded dispatcher runtime exceeds EIP-170 limit: {} > {}",
+            dispatcher_runtime_code.len(),
+            EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES
+        );
+        assert!(
+            dispatcher_deployment_code.len() <= EVM_INITCODE_SIZE_LIMIT_BYTES,
+            "unrolled-sharded dispatcher initcode exceeds EIP-3860 limit: {} > {}",
+            dispatcher_deployment_code.len(),
+            EVM_INITCODE_SIZE_LIMIT_BYTES
+        );
+
+        let manifest = UnrolledShardedProgramManifest {
+            runtime_code_size_limit_bytes: EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES,
+            initcode_size_limit_bytes: EVM_INITCODE_SIZE_LIMIT_BYTES,
+            total_statements,
+            shard_statement_start_indices,
+            shard_statement_end_indices,
+            dispatcher_runtime_code_bytes: dispatcher_runtime_code.len(),
+            dispatcher_deployment_code_bytes: dispatcher_deployment_code.len(),
+            shard_runtime_code_bytes: shard_runtime_codes.iter().map(Vec::len).collect(),
+            shard_deployment_code_bytes: shard_deployment_codes.iter().map(Vec::len).collect(),
+        };
+
+        UnrolledShardedVerifierArtifacts {
+            dispatcher_solidity,
+            dispatcher_deployment_code,
+            dispatcher_runtime_code,
+            shard_solidity_sources,
+            shard_deployment_codes,
+            shard_runtime_codes,
+            manifest,
+        }
     }
 
     /// Allocates memory chunk with given `size` and returns pointer.
@@ -241,7 +584,7 @@ impl EvmLoader {
 
     fn emit_mstore_const(self: &Rc<Self>, ptr: usize, value: U256) {
         match self.codegen_mode {
-            EvmCodegenMode::Unrolled => {
+            EvmCodegenMode::Unrolled | EvmCodegenMode::UnrolledSharded => {
                 self.code
                     .borrow_mut()
                     .runtime_append(format!("mstore({ptr:#x}, {})", hex_encode_u256(&value)));
@@ -254,7 +597,7 @@ impl EvmLoader {
 
     pub(crate) fn emit_mstore_mem(self: &Rc<Self>, dst: usize, src: usize) {
         match self.codegen_mode {
-            EvmCodegenMode::Unrolled => {
+            EvmCodegenMode::Unrolled | EvmCodegenMode::UnrolledSharded => {
                 self.code.borrow_mut().runtime_append(format!("mstore({dst:#x}, mload({src:#x}))"));
             }
             EvmCodegenMode::Compact | EvmCodegenMode::Hybrid => {
@@ -265,7 +608,7 @@ impl EvmLoader {
 
     pub(crate) fn emit_mstore8(self: &Rc<Self>, dst: usize, value: u8) {
         match self.codegen_mode {
-            EvmCodegenMode::Unrolled => {
+            EvmCodegenMode::Unrolled | EvmCodegenMode::UnrolledSharded => {
                 self.code.borrow_mut().runtime_append(format!("mstore8({dst:#x}, {value})"));
             }
             EvmCodegenMode::Compact | EvmCodegenMode::Hybrid => {
@@ -276,7 +619,7 @@ impl EvmLoader {
 
     pub(crate) fn emit_mod_from_mem(self: &Rc<Self>, dst: usize, src: usize) {
         match self.codegen_mode {
-            EvmCodegenMode::Unrolled => {
+            EvmCodegenMode::Unrolled | EvmCodegenMode::UnrolledSharded => {
                 self.code
                     .borrow_mut()
                     .runtime_append(format!("mstore({dst:#x}, mod(mload({src:#x}), f_q))"));
@@ -299,6 +642,61 @@ impl EvmLoader {
     }
 
     fn compact_emit_scalar_value(self: &Rc<Self>, dst: usize, value: &Value<U256>) {
+        fn memory_and_constant<'a>(
+            lhs: &'a Value<U256>,
+            rhs: &'a Value<U256>,
+        ) -> Option<(usize, U256)> {
+            match (lhs, rhs) {
+                (Value::Memory(mem), Value::Constant(c)) => Some((*mem, *c)),
+                (Value::Constant(c), Value::Memory(mem)) => Some((*mem, *c)),
+                _ => None,
+            }
+        }
+
+        fn memory_and_memory<'a>(
+            lhs: &'a Value<U256>,
+            rhs: &'a Value<U256>,
+        ) -> Option<(usize, usize)> {
+            match (lhs, rhs) {
+                (Value::Memory(lhs_ptr), Value::Memory(rhs_ptr)) => Some((*lhs_ptr, *rhs_ptr)),
+                _ => None,
+            }
+        }
+
+        fn mul_add_pattern<'a>(
+            mul_side: &'a Value<U256>,
+            add_side: &'a Value<U256>,
+        ) -> Option<(usize, usize, Option<usize>, Option<U256>)> {
+            let Value::Product(mul_lhs, mul_rhs) = mul_side else {
+                return None;
+            };
+            let (mul_lhs_ptr, mul_rhs_ptr) = memory_and_memory(mul_lhs.as_ref(), mul_rhs.as_ref())?;
+            match add_side {
+                Value::Memory(addend_ptr) => {
+                    Some((mul_lhs_ptr, mul_rhs_ptr, Some(*addend_ptr), None))
+                }
+                Value::Constant(addend_const) => {
+                    Some((mul_lhs_ptr, mul_rhs_ptr, None, Some(*addend_const)))
+                }
+                _ => None,
+            }
+        }
+
+        fn mul_const_add_mem_pattern<'a>(
+            mul_side: &'a Value<U256>,
+            add_side: &'a Value<U256>,
+        ) -> Option<(usize, U256, usize)> {
+            let Value::Product(mul_lhs, mul_rhs) = mul_side else {
+                return None;
+            };
+            let (mul_lhs_ptr, mul_rhs_const) =
+                memory_and_constant(mul_lhs.as_ref(), mul_rhs.as_ref())?;
+            let Value::Memory(addend_ptr) = add_side else {
+                return None;
+            };
+            Some((mul_lhs_ptr, mul_rhs_const, *addend_ptr))
+        }
+
         match value {
             Value::Constant(constant) => {
                 self.compact_emit(CompactInstruction::MstoreConst { dst, value: *constant })
@@ -320,6 +718,52 @@ impl EvmLoader {
             }
             Value::Sum(lhs, rhs) => {
                 if self.is_hybrid_codegen() {
+                    if let Some((mul_lhs, mul_rhs, addend_ptr, addend_const)) =
+                        mul_add_pattern(lhs.as_ref(), rhs.as_ref())
+                            .or_else(|| mul_add_pattern(rhs.as_ref(), lhs.as_ref()))
+                    {
+                        if let Some(addend) = addend_ptr {
+                            self.compact_emit(CompactInstruction::ScalarMulAddMemMemMem {
+                                dst,
+                                mul_lhs,
+                                mul_rhs,
+                                addend,
+                            });
+                            return;
+                        }
+                        if let Some(addend) = addend_const {
+                            self.compact_emit(CompactInstruction::ScalarMulAddMemMemConst {
+                                dst,
+                                mul_lhs,
+                                mul_rhs,
+                                addend,
+                            });
+                            return;
+                        }
+                    }
+                    if let Some((mul_lhs, mul_rhs_const, addend)) =
+                        mul_const_add_mem_pattern(lhs.as_ref(), rhs.as_ref())
+                            .or_else(|| mul_const_add_mem_pattern(rhs.as_ref(), lhs.as_ref()))
+                    {
+                        self.compact_emit(CompactInstruction::ScalarMulAddMemConstMem {
+                            dst,
+                            mul_lhs,
+                            mul_rhs_const,
+                            addend,
+                        });
+                        return;
+                    }
+                }
+                if let Some((lhs_ptr, rhs_const)) = memory_and_constant(lhs.as_ref(), rhs.as_ref())
+                {
+                    self.compact_emit(CompactInstruction::ScalarAddMemConst {
+                        dst,
+                        lhs: lhs_ptr,
+                        rhs: rhs_const,
+                    });
+                    return;
+                }
+                if self.is_hybrid_codegen() {
                     if let (Value::Memory(lhs_ptr), Value::Memory(rhs_ptr)) =
                         (lhs.as_ref(), rhs.as_ref())
                     {
@@ -336,6 +780,15 @@ impl EvmLoader {
                 self.compact_emit(CompactInstruction::ScalarAdd { dst, lhs, rhs });
             }
             Value::Product(lhs, rhs) => {
+                if let Some((lhs_ptr, rhs_const)) = memory_and_constant(lhs.as_ref(), rhs.as_ref())
+                {
+                    self.compact_emit(CompactInstruction::ScalarMulMemConst {
+                        dst,
+                        lhs: lhs_ptr,
+                        rhs: rhs_const,
+                    });
+                    return;
+                }
                 if self.is_hybrid_codegen() {
                     if let (Value::Memory(lhs_ptr), Value::Memory(rhs_ptr)) =
                         (lhs.as_ref(), rhs.as_ref())
@@ -384,7 +837,7 @@ impl EvmLoader {
     pub fn calldataload_scalar(self: &Rc<Self>, offset: usize) -> Scalar {
         let ptr = self.allocate(0x20);
         match self.codegen_mode {
-            EvmCodegenMode::Unrolled => {
+            EvmCodegenMode::Unrolled | EvmCodegenMode::UnrolledSharded => {
                 let code = format!("mstore({ptr:#x}, mod(calldataload({offset:#x}), f_q))");
                 self.code.borrow_mut().runtime_append(code);
             }
@@ -400,26 +853,33 @@ impl EvmLoader {
     pub fn calldataload_ec_point(self: &Rc<Self>, offset: usize) -> EcPoint {
         let x_ptr = self.allocate(BLS_G1_BYTES);
         match self.codegen_mode {
-            EvmCodegenMode::Unrolled => {
+            EvmCodegenMode::Unrolled | EvmCodegenMode::UnrolledSharded => {
                 let y_ptr = x_ptr + BLS_ENCODED_FP_BYTES;
                 let coord_bytes = self.base_field_bytes;
                 let pad = BLS_ENCODED_FP_BYTES - coord_bytes;
                 let x_cd_ptr = offset;
                 let y_cd_ptr = offset + coord_bytes;
+                let low_word_init = if coord_bytes < 0x20 {
+                    format!(
+                        "\n                    mstore({:#x}, 0)\n                    mstore({:#x}, 0)",
+                        x_ptr + 0x20,
+                        y_ptr + 0x20
+                    )
+                } else {
+                    String::new()
+                };
                 let code = format!(
                     "
                 {{
                     mstore({x_ptr:#x}, 0)
-                    mstore({:#x}, 0)
                     mstore({y_ptr:#x}, 0)
-                    mstore({:#x}, 0)
+                    {low_word_init}
                     calldatacopy({:#x}, {x_cd_ptr:#x}, {coord_bytes:#x})
                     calldatacopy({:#x}, {y_cd_ptr:#x}, {coord_bytes:#x})
                 }}",
-                    x_ptr + 0x20,
-                    y_ptr + 0x20,
                     x_ptr + pad,
-                    y_ptr + pad
+                    y_ptr + pad,
+                    low_word_init = low_word_init
                 );
                 self.code.borrow_mut().runtime_append(code);
             }
@@ -441,11 +901,15 @@ impl EvmLoader {
     ///
     /// This decompresses into EIP-2537 uncompressed `(x, y)` form in memory.
     pub fn calldataload_ec_point_compressed(self: &Rc<Self>, offset: usize) -> EcPoint {
-        if self.is_compact_codegen() {
-            panic!("compact EVM codegen does not support compressed proof-point encoding yet");
-        }
-
         let point_ptr = self.allocate(BLS_G1_BYTES);
+        if self.is_compact_codegen() {
+            self.compact_emit(CompactInstruction::CalldataPointCompressed {
+                dst: point_ptr,
+                offset,
+                coord_bytes: self.base_field_bytes,
+            });
+            return self.ec_point(Value::Memory(point_ptr));
+        }
         let x_ptr = point_ptr;
         let y_ptr = point_ptr + BLS_ENCODED_FP_BYTES;
         let modexp_input_ptr = self.compressed_modexp_input_ptr;
@@ -616,7 +1080,7 @@ impl EvmLoader {
     ) -> EcPoint {
         let ptr = self.allocate(BLS_G1_BYTES);
         match self.codegen_mode {
-            EvmCodegenMode::Unrolled => {
+            EvmCodegenMode::Unrolled | EvmCodegenMode::UnrolledSharded => {
                 let mut code = String::new();
                 let x_ptr = ptr;
                 code.push_str("let x_lo := 0\n");
@@ -687,7 +1151,7 @@ impl EvmLoader {
 
     pub(crate) fn scalar(self: &Rc<Self>, value: Value<U256>) -> Scalar {
         let value = if matches!(value, Value::Constant(_) | Value::Memory(_))
-            || (self.codegen_mode == EvmCodegenMode::Unrolled && matches!(value, Value::Negated(_)))
+            || (self.is_unrolled_codegen() && matches!(value, Value::Negated(_)))
         {
             value
         } else {
@@ -698,7 +1162,7 @@ impl EvmLoader {
             } else {
                 let ptr = self.allocate(0x20);
                 match self.codegen_mode {
-                    EvmCodegenMode::Unrolled => {
+                    EvmCodegenMode::Unrolled | EvmCodegenMode::UnrolledSharded => {
                         let v = self.push(&Scalar { loader: self.clone(), value });
                         self.code.borrow_mut().runtime_append(format!("mstore({ptr:#x}, {v})"));
                     }
@@ -723,7 +1187,7 @@ impl EvmLoader {
     pub fn keccak256(self: &Rc<Self>, ptr: usize, len: usize) -> usize {
         let hash_ptr = self.allocate(0x20);
         match self.codegen_mode {
-            EvmCodegenMode::Unrolled => {
+            EvmCodegenMode::Unrolled | EvmCodegenMode::UnrolledSharded => {
                 let code = format!("mstore({hash_ptr:#x}, keccak256({ptr:#x}, {len}))");
                 self.code.borrow_mut().runtime_append(code);
             }
@@ -737,7 +1201,7 @@ impl EvmLoader {
     /// Copies a field element into given `ptr`.
     pub fn copy_scalar(self: &Rc<Self>, scalar: &Scalar, ptr: usize) {
         match self.codegen_mode {
-            EvmCodegenMode::Unrolled => {
+            EvmCodegenMode::Unrolled | EvmCodegenMode::UnrolledSharded => {
                 let scalar = self.push(scalar);
                 self.code.borrow_mut().runtime_append(format!("mstore({ptr:#x}, {scalar})"));
             }
@@ -758,7 +1222,7 @@ impl EvmLoader {
     pub fn copy_ec_point(self: &Rc<Self>, value: &EcPoint, ptr: usize) {
         match value.value {
             Value::Memory(src_ptr) => match self.codegen_mode {
-                EvmCodegenMode::Unrolled => {
+                EvmCodegenMode::Unrolled | EvmCodegenMode::UnrolledSharded => {
                     let src_words = (0..(BLS_G1_BYTES / 0x20)).map(|idx| src_ptr + idx * 0x20);
                     let dst_words = (0..(BLS_G1_BYTES / 0x20)).map(|idx| ptr + idx * 0x20);
                     let stores = dst_words
@@ -790,51 +1254,65 @@ impl EvmLoader {
     }
 
     fn staticcall(self: &Rc<Self>, precompile: Precompiled, cd_ptr: usize, rd_ptr: usize) {
+        let (cd_len, rd_len) = match precompile {
+            Precompiled::BigModExp => (0xc0, 0x20),
+            // We use G1MSM with a single pair: [G1 point (128 bytes) || scalar (32 bytes)].
+            Precompiled::Bls12_381G1Msm => (BLS_G1_BYTES + 0x20, BLS_G1_BYTES),
+            // 2 pairings in one call:
+            //   [G1 (128) || G2 (256)] * 2 = 768 bytes
+            Precompiled::Bls12_381Pairing => (2 * (BLS_G1_BYTES + BLS_G2_BYTES), 0x20),
+        };
+        self.staticcall_sized(precompile as usize, cd_ptr, cd_len, rd_ptr, rd_len)
+    }
+
+    fn staticcall_sized(
+        self: &Rc<Self>,
+        precompile: usize,
+        cd_ptr: usize,
+        cd_len: usize,
+        rd_ptr: usize,
+        rd_len: usize,
+    ) {
         match self.codegen_mode {
-            EvmCodegenMode::Unrolled => {
-                let (cd_len, rd_len) = match precompile {
-                    Precompiled::BigModExp => (0xc0, 0x20),
-                    Precompiled::Bls12_381G1Add => (2 * BLS_G1_BYTES, BLS_G1_BYTES),
-                    // We use G1MSM with a single pair: [G1 point (128 bytes) || scalar (32 bytes)].
-                    Precompiled::Bls12_381G1Msm => (BLS_G1_BYTES + 0x20, BLS_G1_BYTES),
-                    // 2 pairings in one call:
-                    //   [G1 (128) || G2 (256)] * 2 = 768 bytes
-                    Precompiled::Bls12_381Pairing => (2 * (BLS_G1_BYTES + BLS_G2_BYTES), 0x20),
-                };
-                let a = precompile as usize;
-                let code = format!("success := and(eq(staticcall(gas(), {a:#x}, {cd_ptr:#x}, {cd_len:#x}, {rd_ptr:#x}, {rd_len:#x}), 1), success)");
+            EvmCodegenMode::Unrolled | EvmCodegenMode::UnrolledSharded => {
+                let code = format!(
+                    "success := and(eq(staticcall(gas(), {precompile:#x}, {cd_ptr:#x}, {cd_len:#x}, {rd_ptr:#x}, {rd_len:#x}), 1), success)"
+                );
                 self.code.borrow_mut().runtime_append(code);
             }
             EvmCodegenMode::Compact | EvmCodegenMode::Hybrid => {
-                self.compact_emit(CompactInstruction::StaticCall {
-                    precompile: precompile as usize,
+                self.compact_emit(CompactInstruction::StaticCallSized {
+                    precompile,
                     cd_ptr,
+                    cd_len,
                     rd_ptr,
+                    rd_len,
                 });
             }
         }
     }
 
-    fn invert(self: &Rc<Self>, scalar: &Scalar) -> Scalar {
-        let rd_ptr = self.allocate(0x20);
-        let [cd_ptr, ..] = [
-            &self.scalar(Value::Constant(U256::from(0x20))),
-            &self.scalar(Value::Constant(U256::from(0x20))),
-            &self.scalar(Value::Constant(U256::from(0x20))),
-            scalar,
-            &self.scalar(Value::Constant(self.scalar_modulus - U256::from(2))),
-            &self.scalar(Value::Constant(self.scalar_modulus)),
-        ]
-        .map(|value| self.dup_scalar(value).ptr());
-        self.staticcall(Precompiled::BigModExp, cd_ptr, rd_ptr);
-        self.scalar(Value::Memory(rd_ptr))
+    fn inversion_modexp_input_ptr(self: &Rc<Self>) -> usize {
+        if let Some(ptr) = *self.invert_modexp_input_ptr.borrow() {
+            return ptr;
+        }
+
+        let ptr = self.allocate(0xc0);
+        self.emit_mstore_const(ptr, U256::from(0x20));
+        self.emit_mstore_const(ptr + 0x20, U256::from(0x20));
+        self.emit_mstore_const(ptr + 0x40, U256::from(0x20));
+        self.emit_mstore_const(ptr + 0x80, self.scalar_modulus - U256::from(2));
+        self.emit_mstore_const(ptr + 0xa0, self.scalar_modulus);
+        *self.invert_modexp_input_ptr.borrow_mut() = Some(ptr);
+        ptr
     }
 
-    fn ec_point_add(self: &Rc<Self>, lhs: &EcPoint, rhs: &EcPoint) -> EcPoint {
-        let rd_ptr = self.dup_ec_point(lhs).ptr();
-        self.dup_ec_point(rhs);
-        self.staticcall(Precompiled::Bls12_381G1Add, rd_ptr, rd_ptr);
-        self.ec_point(Value::Memory(rd_ptr))
+    fn invert(self: &Rc<Self>, scalar: &Scalar) -> Scalar {
+        let rd_ptr = self.allocate(0x20);
+        let cd_ptr = self.inversion_modexp_input_ptr();
+        self.copy_scalar(scalar, cd_ptr + 0x60);
+        self.staticcall_sized(Precompiled::BigModExp as usize, cd_ptr, 0xc0, rd_ptr, 0x20);
+        self.scalar(Value::Memory(rd_ptr))
     }
 
     fn ec_point_scalar_mul(self: &Rc<Self>, ec_point: &EcPoint, scalar: &Scalar) -> EcPoint {
@@ -876,7 +1354,7 @@ impl EvmLoader {
 
         self.staticcall(Precompiled::Bls12_381Pairing, rd_ptr, rd_ptr);
         match self.codegen_mode {
-            EvmCodegenMode::Unrolled => {
+            EvmCodegenMode::Unrolled | EvmCodegenMode::UnrolledSharded => {
                 let code = format!("success := and(eq(mload({rd_ptr:#x}), 1), success)");
                 self.code.borrow_mut().runtime_append(code);
             }
@@ -887,6 +1365,24 @@ impl EvmLoader {
     }
 
     fn add(self: &Rc<Self>, lhs: &Scalar, rhs: &Scalar) -> Scalar {
+        if lhs.value == rhs.value {
+            if let Value::Constant(constant) = lhs.value {
+                let out = (U512::from(constant) * U512::from(2)) % U512::from(self.scalar_modulus);
+                return self.scalar(Value::Constant(U256::from(out)));
+            }
+        }
+
+        if let Value::Constant(constant) = lhs.value {
+            if constant == U256::ZERO {
+                return rhs.clone();
+            }
+        }
+        if let Value::Constant(constant) = rhs.value {
+            if constant == U256::ZERO {
+                return lhs.clone();
+            }
+        }
+
         if let (Value::Constant(lhs), Value::Constant(rhs)) = (&lhs.value, &rhs.value) {
             let out = (U512::from(*lhs) + U512::from(*rhs)) % U512::from(self.scalar_modulus);
             return self.scalar(Value::Constant(U256::from(out)));
@@ -896,6 +1392,16 @@ impl EvmLoader {
     }
 
     fn sub(self: &Rc<Self>, lhs: &Scalar, rhs: &Scalar) -> Scalar {
+        if lhs.value == rhs.value {
+            return self.scalar(Value::Constant(U256::ZERO));
+        }
+
+        if let Value::Constant(constant) = rhs.value {
+            if constant == U256::ZERO {
+                return lhs.clone();
+            }
+        }
+
         if rhs.is_const() {
             return self.add(lhs, &self.neg(rhs));
         }
@@ -907,6 +1413,23 @@ impl EvmLoader {
     }
 
     fn mul(self: &Rc<Self>, lhs: &Scalar, rhs: &Scalar) -> Scalar {
+        if let Value::Constant(constant) = lhs.value {
+            if constant == U256::ZERO {
+                return self.scalar(Value::Constant(U256::ZERO));
+            }
+            if constant == U256::from(1) {
+                return rhs.clone();
+            }
+        }
+        if let Value::Constant(constant) = rhs.value {
+            if constant == U256::ZERO {
+                return self.scalar(Value::Constant(U256::ZERO));
+            }
+            if constant == U256::from(1) {
+                return lhs.clone();
+            }
+        }
+
         if let (Value::Constant(lhs), Value::Constant(rhs)) = (&lhs.value, &rhs.value) {
             let out = (U512::from(*lhs) * U512::from(*rhs)) % U512::from(self.scalar_modulus);
             return self.scalar(Value::Constant(U256::from(out)));
@@ -917,6 +1440,9 @@ impl EvmLoader {
 
     fn neg(self: &Rc<Self>, scalar: &Scalar) -> Scalar {
         if let Value::Constant(constant) = scalar.value {
+            if constant == U256::ZERO {
+                return self.scalar(Value::Constant(U256::ZERO));
+            }
             return self.scalar(Value::Constant(self.scalar_modulus - constant));
         }
 
@@ -1168,15 +1694,36 @@ where
     fn multi_scalar_multiplication(
         pairs: &[(&<Self as ScalarLoader<C::Scalar>>::LoadedScalar, &EcPoint)],
     ) -> EcPoint {
-        pairs
-            .iter()
-            .cloned()
-            .map(|(scalar, ec_point)| match scalar.value {
-                Value::Constant(constant) if U256::from(1) == constant => ec_point.clone(),
-                _ => ec_point.loader.ec_point_scalar_mul(ec_point, scalar),
-            })
-            .reduce(|acc, ec_point| acc.loader.ec_point_add(&acc, &ec_point))
-            .expect("pairs should not be empty")
+        let (first_scalar, first_point) = pairs.first().expect("pairs should not be empty");
+        let loader = first_point.loader.clone();
+
+        if pairs.len() == 1 {
+            return match first_scalar.value {
+                Value::Constant(constant) if U256::from(1) == constant => (*first_point).clone(),
+                _ => loader.ec_point_scalar_mul(first_point, first_scalar),
+            };
+        }
+
+        // BLS12-381 G1MSM expects a packed calldata slab of [point(128) || scalar(32)] tuples.
+        let pair_bytes = BLS_G1_BYTES + 0x20;
+        let calldata_len = pairs.len() * pair_bytes;
+        let calldata_ptr = loader.allocate(calldata_len);
+
+        for (idx, (scalar, ec_point)) in pairs.iter().enumerate() {
+            let pair_ptr = calldata_ptr + idx * pair_bytes;
+            loader.copy_ec_point(ec_point, pair_ptr);
+            loader.copy_scalar(scalar, pair_ptr + BLS_G1_BYTES);
+        }
+
+        let result_ptr = loader.allocate(BLS_G1_BYTES);
+        loader.staticcall_sized(
+            Precompiled::Bls12_381G1Msm as usize,
+            calldata_ptr,
+            calldata_len,
+            result_ptr,
+            BLS_G1_BYTES,
+        );
+        loader.ec_point(Value::Memory(result_ptr))
     }
 }
 
@@ -1341,7 +1888,9 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
     fn batch_invert<'a>(values: impl IntoIterator<Item = &'a mut Scalar>) {
         let values = values.into_iter().collect_vec();
         let loader = &values.first().unwrap().loader;
-        if loader.is_compact_codegen() {
+        let fast_unrolled =
+            std::env::var("MIDNIGHT_EVM_FAST_BATCH_INVERT").map(|v| v == "1").unwrap_or(false);
+        if loader.is_compact_codegen() || !fast_unrolled {
             values.into_iter().for_each(|value| {
                 *value = FieldOps::invert(&*value).unwrap_or_else(|| value.clone())
             });

@@ -9,7 +9,12 @@ use std::{
 };
 
 #[cfg(feature = "revm")]
-pub use executor::{deploy_and_call, deploy_compact_and_call};
+pub use executor::{
+    deploy_and_call, deploy_and_call_with_metrics, deploy_compact_and_call,
+    deploy_compact_and_call_with_metrics, deploy_unrolled_sharded_and_call,
+    deploy_unrolled_sharded_and_call_with_metrics, CompactExecutionMetrics, EvmExecutionMetrics,
+    UnrolledShardedExecutionMetrics,
+};
 pub use ruint::aliases::{B160 as Address, B256, U256, U512};
 
 #[cfg(feature = "revm")]

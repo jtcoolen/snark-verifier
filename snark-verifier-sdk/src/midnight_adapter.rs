@@ -60,8 +60,9 @@ use snark_verifier::{
 use snark_verifier::{
     loader::{
         evm::{
-            compile_solidity, compile_solidity_via_ir, encode_calldata, CompactVerifierArtifacts,
-            EvmCodegenMode, EvmLoader,
+            compile_solidity, compile_solidity_via_ir, encode_calldata, CompactExecutionMetrics,
+            CompactVerifierArtifacts, EvmCodegenMode, EvmExecutionMetrics, EvmLoader,
+            UnrolledShardedExecutionMetrics, UnrolledShardedVerifierArtifacts,
         },
         EcPointLoader,
     },
@@ -385,11 +386,39 @@ impl MidnightProofBundle {
         Ok(compile_solidity(&solidity))
     }
 
+    /// Generate unrolled-sharded verifier dispatcher + shard artifacts.
+    #[cfg(feature = "loader_evm")]
+    pub fn generate_evm_verifier_unrolled_sharded_artifacts(
+        &self,
+    ) -> Result<UnrolledShardedVerifierArtifacts> {
+        let loader = self.build_evm_verifier_loader_with_mode(
+            EvmProofPointEncoding::Uncompressed,
+            EvmCodegenMode::UnrolledSharded,
+        )?;
+        Ok(loader.unrolled_sharded_verifier_artifacts())
+    }
+
     /// Generate compact verifier runtime + data-page artifacts.
     #[cfg(feature = "loader_evm")]
     pub fn generate_evm_verifier_compact_artifacts(&self) -> Result<CompactVerifierArtifacts> {
         let loader = self.build_evm_verifier_loader_with_mode(
             EvmProofPointEncoding::Uncompressed,
+            EvmCodegenMode::Compact,
+        )?;
+        Ok(loader.compact_verifier_artifacts())
+    }
+
+    /// Generate compact verifier runtime + data-page artifacts for compressed
+    /// proof points (`[sign_byte || x_coordinate_bytes]`).
+    ///
+    /// This path is intentionally opt-in while benchmark data for compact
+    /// compressed proofs is gathered.
+    #[cfg(feature = "loader_evm")]
+    pub fn generate_evm_verifier_compact_artifacts_compressed_proof(
+        &self,
+    ) -> Result<CompactVerifierArtifacts> {
+        let loader = self.build_evm_verifier_loader_with_mode(
+            EvmProofPointEncoding::XSignCompressed,
             EvmCodegenMode::Compact,
         )?;
         Ok(loader.compact_verifier_artifacts())
@@ -403,6 +432,22 @@ impl MidnightProofBundle {
     pub fn generate_evm_verifier_hybrid_artifacts(&self) -> Result<CompactVerifierArtifacts> {
         let loader = self.build_evm_verifier_loader_with_mode(
             EvmProofPointEncoding::Uncompressed,
+            EvmCodegenMode::Hybrid,
+        )?;
+        Ok(loader.compact_verifier_artifacts())
+    }
+
+    /// Generate hybrid verifier runtime + data-page artifacts for compressed
+    /// proof points (`[sign_byte || x_coordinate_bytes]`).
+    ///
+    /// This path is intentionally opt-in while benchmark data for compact
+    /// compressed proofs is gathered.
+    #[cfg(feature = "loader_evm")]
+    pub fn generate_evm_verifier_hybrid_artifacts_compressed_proof(
+        &self,
+    ) -> Result<CompactVerifierArtifacts> {
+        let loader = self.build_evm_verifier_loader_with_mode(
+            EvmProofPointEncoding::XSignCompressed,
             EvmCodegenMode::Hybrid,
         )?;
         Ok(loader.compact_verifier_artifacts())
@@ -422,9 +467,17 @@ impl MidnightProofBundle {
     /// Returns gas used by the verification call.
     #[cfg(all(feature = "loader_evm", feature = "revm"))]
     pub fn verify_with_generated_solidity_revm(&self) -> Result<u64> {
+        Ok(self.verify_with_generated_solidity_revm_with_metrics()?.call_gas)
+    }
+
+    /// Deploy and call the generated verifier in local revm.
+    ///
+    /// Returns deployment and call gas metrics.
+    #[cfg(all(feature = "loader_evm", feature = "revm"))]
+    pub fn verify_with_generated_solidity_revm_with_metrics(&self) -> Result<EvmExecutionMetrics> {
         let bytecode = self.generate_evm_verifier_bytecode()?;
         let calldata = self.encode_evm_calldata()?;
-        snark_verifier::loader::evm::deploy_and_call(bytecode, calldata)
+        snark_verifier::loader::evm::deploy_and_call_with_metrics(bytecode, calldata)
             .map_err(|err| anyhow!("revm deployment/call failed: {err}"))
     }
 
@@ -433,9 +486,19 @@ impl MidnightProofBundle {
     /// Returns gas used by the verification call.
     #[cfg(all(feature = "loader_evm", feature = "revm"))]
     pub fn verify_with_generated_solidity_revm_compressed_proof(&self) -> Result<u64> {
+        Ok(self.verify_with_generated_solidity_revm_compressed_proof_with_metrics()?.call_gas)
+    }
+
+    /// Deploy and call a verifier expecting compressed proof points in local revm.
+    ///
+    /// Returns deployment and call gas metrics.
+    #[cfg(all(feature = "loader_evm", feature = "revm"))]
+    pub fn verify_with_generated_solidity_revm_compressed_proof_with_metrics(
+        &self,
+    ) -> Result<EvmExecutionMetrics> {
         let bytecode = self.generate_evm_verifier_bytecode_compressed_proof()?;
         let calldata = self.encode_evm_calldata()?;
-        snark_verifier::loader::evm::deploy_and_call(bytecode, calldata)
+        snark_verifier::loader::evm::deploy_and_call_with_metrics(bytecode, calldata)
             .map_err(|err| anyhow!("revm deployment/call failed: {err}"))
     }
 
@@ -444,10 +507,40 @@ impl MidnightProofBundle {
     /// Returns gas used by the verification call.
     #[cfg(all(feature = "loader_evm", feature = "revm"))]
     pub fn verify_with_generated_solidity_revm_compact(&self) -> Result<u64> {
+        Ok(self.verify_with_generated_solidity_revm_compact_with_metrics()?.call_gas)
+    }
+
+    /// Deploy and call compact verifier/runtime pages in local revm.
+    ///
+    /// Returns deployment and call gas metrics.
+    #[cfg(all(feature = "loader_evm", feature = "revm"))]
+    pub fn verify_with_generated_solidity_revm_compact_with_metrics(
+        &self,
+    ) -> Result<CompactExecutionMetrics> {
         let compact = self.generate_evm_verifier_compact_artifacts()?;
         let runtime_deployment_code = compile_solidity_via_ir(&compact.runtime_solidity);
         let calldata = self.encode_evm_calldata()?;
-        snark_verifier::loader::evm::deploy_compact_and_call(
+        snark_verifier::loader::evm::deploy_compact_and_call_with_metrics(
+            compact.page_deployment_codes,
+            runtime_deployment_code,
+            compact.manifest.program_words,
+            calldata,
+        )
+        .map_err(|err| anyhow!("revm compact deployment/call failed: {err}"))
+    }
+
+    /// Deploy and call compact verifier/runtime pages expecting compressed proof
+    /// points in local revm.
+    ///
+    /// Returns deployment and call gas metrics.
+    #[cfg(all(feature = "loader_evm", feature = "revm"))]
+    pub fn verify_with_generated_solidity_revm_compact_compressed_proof_with_metrics(
+        &self,
+    ) -> Result<CompactExecutionMetrics> {
+        let compact = self.generate_evm_verifier_compact_artifacts_compressed_proof()?;
+        let runtime_deployment_code = compile_solidity_via_ir(&compact.runtime_solidity);
+        let calldata = self.encode_evm_calldata()?;
+        snark_verifier::loader::evm::deploy_compact_and_call_with_metrics(
             compact.page_deployment_codes,
             runtime_deployment_code,
             compact.manifest.program_words,
@@ -461,16 +554,71 @@ impl MidnightProofBundle {
     /// Returns gas used by the verification call.
     #[cfg(all(feature = "loader_evm", feature = "revm"))]
     pub fn verify_with_generated_solidity_revm_hybrid(&self) -> Result<u64> {
+        Ok(self.verify_with_generated_solidity_revm_hybrid_with_metrics()?.call_gas)
+    }
+
+    /// Deploy and call hybrid verifier/runtime pages in local revm.
+    ///
+    /// Returns deployment and call gas metrics.
+    #[cfg(all(feature = "loader_evm", feature = "revm"))]
+    pub fn verify_with_generated_solidity_revm_hybrid_with_metrics(
+        &self,
+    ) -> Result<CompactExecutionMetrics> {
         let hybrid = self.generate_evm_verifier_hybrid_artifacts()?;
         let runtime_deployment_code = compile_solidity_via_ir(&hybrid.runtime_solidity);
         let calldata = self.encode_evm_calldata()?;
-        snark_verifier::loader::evm::deploy_compact_and_call(
+        snark_verifier::loader::evm::deploy_compact_and_call_with_metrics(
             hybrid.page_deployment_codes,
             runtime_deployment_code,
             hybrid.manifest.program_words,
             calldata,
         )
         .map_err(|err| anyhow!("revm hybrid deployment/call failed: {err}"))
+    }
+
+    /// Deploy and call hybrid verifier/runtime pages expecting compressed proof
+    /// points in local revm.
+    ///
+    /// Returns deployment and call gas metrics.
+    #[cfg(all(feature = "loader_evm", feature = "revm"))]
+    pub fn verify_with_generated_solidity_revm_hybrid_compressed_proof_with_metrics(
+        &self,
+    ) -> Result<CompactExecutionMetrics> {
+        let hybrid = self.generate_evm_verifier_hybrid_artifacts_compressed_proof()?;
+        let runtime_deployment_code = compile_solidity_via_ir(&hybrid.runtime_solidity);
+        let calldata = self.encode_evm_calldata()?;
+        snark_verifier::loader::evm::deploy_compact_and_call_with_metrics(
+            hybrid.page_deployment_codes,
+            runtime_deployment_code,
+            hybrid.manifest.program_words,
+            calldata,
+        )
+        .map_err(|err| anyhow!("revm hybrid deployment/call failed: {err}"))
+    }
+
+    /// Deploy and call unrolled-sharded verifier/runtime shards in local revm.
+    ///
+    /// Returns gas used by the verification call.
+    #[cfg(all(feature = "loader_evm", feature = "revm"))]
+    pub fn verify_with_generated_solidity_revm_unrolled_sharded(&self) -> Result<u64> {
+        Ok(self.verify_with_generated_solidity_revm_unrolled_sharded_with_metrics()?.call_gas)
+    }
+
+    /// Deploy and call unrolled-sharded verifier/runtime shards in local revm.
+    ///
+    /// Returns deployment and call gas metrics.
+    #[cfg(all(feature = "loader_evm", feature = "revm"))]
+    pub fn verify_with_generated_solidity_revm_unrolled_sharded_with_metrics(
+        &self,
+    ) -> Result<UnrolledShardedExecutionMetrics> {
+        let sharded = self.generate_evm_verifier_unrolled_sharded_artifacts()?;
+        let calldata = self.encode_evm_calldata()?;
+        snark_verifier::loader::evm::deploy_unrolled_sharded_and_call_with_metrics(
+            sharded.shard_deployment_codes,
+            sharded.dispatcher_deployment_code,
+            calldata,
+        )
+        .map_err(|err| anyhow!("revm unrolled-sharded deployment/call failed: {err}"))
     }
 
     /// Convert non-committed instances into halo2-axiom `Fr`.

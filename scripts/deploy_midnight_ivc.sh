@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/deploy_midnight_ivc.sh [hybrid|compact] [call|no-call]
+  scripts/deploy_midnight_ivc.sh [hybrid|compact|unrolled-sharded] [call|no-call]
 
 Environment:
   RPC_URL      JSON-RPC endpoint
@@ -13,13 +13,14 @@ Environment:
 Examples:
   RPC_URL=http://127.0.0.1:8545 PRIVATE_KEY=0x... scripts/deploy_midnight_ivc.sh hybrid call
   RPC_URL=http://127.0.0.1:8545 PRIVATE_KEY=0x... scripts/deploy_midnight_ivc.sh compact no-call
+  RPC_URL=http://127.0.0.1:8545 PRIVATE_KEY=0x... scripts/deploy_midnight_ivc.sh unrolled-sharded call
 EOF
 }
 
 MODE="${1:-hybrid}"
 DO_CALL="${2:-call}"
 
-if [[ "${MODE}" != "hybrid" && "${MODE}" != "compact" ]]; then
+if [[ "${MODE}" != "hybrid" && "${MODE}" != "compact" && "${MODE}" != "unrolled-sharded" ]]; then
   usage
   exit 1
 fi
@@ -44,6 +45,11 @@ case "${MODE}" in
     PAGES_PATH="${EXAMPLES_DIR}/midnight_ivc_compact_pages.bytecode"
     MANIFEST_PATH="${EXAMPLES_DIR}/midnight_ivc_compact_manifest.txt"
     ;;
+  unrolled-sharded)
+    RUNTIME_PATH="${EXAMPLES_DIR}/midnight_ivc_unrolled_sharded_dispatcher.bytecode"
+    PAGES_PATH="${EXAMPLES_DIR}/midnight_ivc_unrolled_sharded_shards.bytecode"
+    MANIFEST_PATH="${EXAMPLES_DIR}/midnight_ivc_unrolled_sharded_manifest.txt"
+    ;;
 esac
 CALLDATA_PATH="${EXAMPLES_DIR}/midnight_ivc.calldata"
 
@@ -54,10 +60,23 @@ for f in "${RUNTIME_PATH}" "${PAGES_PATH}" "${MANIFEST_PATH}" "${CALLDATA_PATH}"
   fi
 done
 
-program_words="$(awk -F': ' '$1=="program_words"{print $2; exit}' "${MANIFEST_PATH}")"
-if [[ -z "${program_words}" ]]; then
-  echo "Could not parse program_words from ${MANIFEST_PATH}" >&2
-  exit 1
+program_words=""
+opcode_version=""
+if [[ "${MODE}" == "compact" || "${MODE}" == "hybrid" ]]; then
+  program_words="$(awk -F': ' '$1=="program_words"{print $2; exit}' "${MANIFEST_PATH}")"
+  if [[ -z "${program_words}" ]]; then
+    echo "Could not parse program_words from ${MANIFEST_PATH}" >&2
+    exit 1
+  fi
+  opcode_version="$(awk -F': ' '$1=="opcode_version"{print $2; exit}' "${MANIFEST_PATH}")"
+  if [[ -z "${opcode_version}" ]]; then
+    echo "Could not parse opcode_version from ${MANIFEST_PATH}" >&2
+    exit 1
+  fi
+  if [[ "${opcode_version}" != "2" ]]; then
+    echo "Unsupported opcode_version=${opcode_version} in ${MANIFEST_PATH} (expected 2)" >&2
+    exit 1
+  fi
 fi
 
 runtime_init="$(tr -d '[:space:]' < "${RUNTIME_PATH}")"
@@ -66,15 +85,19 @@ if [[ -z "${runtime_init}" ]]; then
   exit 1
 fi
 
-mapfile -t page_init_codes < <(awk -F' = ' '/^page\[[0-9]+\] = 0x/ {print $2}' "${PAGES_PATH}")
+if [[ "${MODE}" == "unrolled-sharded" ]]; then
+  mapfile -t page_init_codes < <(awk -F' = ' '/^shard\[[0-9]+\] = 0x/ {print $2}' "${PAGES_PATH}")
+else
+  mapfile -t page_init_codes < <(awk -F' = ' '/^page\[[0-9]+\] = 0x/ {print $2}' "${PAGES_PATH}")
+fi
 if [[ "${#page_init_codes[@]}" -eq 0 ]]; then
-  echo "No page bytecodes found in ${PAGES_PATH}" >&2
+  echo "No shard/page bytecodes found in ${PAGES_PATH}" >&2
   exit 1
 fi
 
 send_create() {
   local init_code="$1"
-  local tx_json tx_hash receipt contract
+  local tx_json tx_hash receipt contract gas_used
   tx_json="$(cast send --json --rpc-url "${RPC_URL}" --private-key "${PRIVATE_KEY}" --gas-limit 30000000 --create "${init_code}")"
   tx_hash="$(jq -r '.transactionHash // .hash // empty' <<<"${tx_json}")"
   if [[ -z "${tx_hash}" ]]; then
@@ -89,7 +112,13 @@ send_create() {
     echo "${receipt}" >&2
     exit 1
   fi
-  echo "${contract}"
+  gas_used="$(jq -r '.gasUsed // .gas_used // empty' <<<"${receipt}")"
+  if [[ -z "${gas_used}" ]]; then
+    echo "Could not extract deployment gas from receipt: ${tx_hash}" >&2
+    echo "${receipt}" >&2
+    exit 1
+  fi
+  echo "${contract}|${gas_used}"
 }
 
 send_call() {
@@ -111,19 +140,37 @@ send_call() {
 
 echo "Deploying ${#page_init_codes[@]} ${MODE} pages..."
 page_addresses=()
+page_deploy_gas=0
 for i in "${!page_init_codes[@]}"; do
-  addr="$(send_create "${page_init_codes[$i]}")"
+  page_result="$(send_create "${page_init_codes[$i]}")"
+  addr="${page_result%%|*}"
+  gas_used="${page_result##*|}"
   page_addresses+=("${addr}")
-  echo "  page[${i}] => ${addr}"
+  page_deploy_gas=$((page_deploy_gas + gas_used))
+  echo "  page[${i}] => ${addr} (gas=${gas_used})"
 done
 
 addresses_csv="$(IFS=,; echo "${page_addresses[*]}")"
-constructor_args="$(cast abi-encode 'constructor(address[],uint256)' "[${addresses_csv}]" "${program_words}")"
+if [[ "${MODE}" == "unrolled-sharded" ]]; then
+  constructor_args="$(cast abi-encode 'constructor(address[])' "[${addresses_csv}]")"
+else
+  constructor_args="$(cast abi-encode 'constructor(address[],uint256)' "[${addresses_csv}]" "${program_words}")"
+fi
 verifier_init="${runtime_init}${constructor_args#0x}"
 
-echo "Deploying verifier runtime (mode=${MODE}, program_words=${program_words})..."
-verifier_address="$(send_create "${verifier_init}")"
-echo "Verifier: ${verifier_address}"
+if [[ "${MODE}" == "unrolled-sharded" ]]; then
+  echo "Deploying verifier dispatcher (mode=${MODE}, shards=${#page_init_codes[@]})..."
+else
+  echo "Deploying verifier runtime (mode=${MODE}, program_words=${program_words})..."
+fi
+verifier_result="$(send_create "${verifier_init}")"
+verifier_address="${verifier_result%%|*}"
+verifier_deploy_gas="${verifier_result##*|}"
+if [[ "${MODE}" == "unrolled-sharded" ]]; then
+  echo "Dispatcher: ${verifier_address} (gas=${verifier_deploy_gas})"
+else
+  echo "Verifier: ${verifier_address} (gas=${verifier_deploy_gas})"
+fi
 
 if [[ "${DO_CALL}" == "call" ]]; then
   calldata_hex="$(tr -d '[:space:]' < "${CALLDATA_PATH}")"
@@ -149,6 +196,15 @@ echo
 echo "Done."
 echo "Mode: ${MODE}"
 echo "Pages: ${#page_init_codes[@]}"
-echo "Program words: ${program_words}"
+if [[ "${MODE}" != "unrolled-sharded" ]]; then
+  echo "Opcode version: ${opcode_version}"
+  echo "Program words: ${program_words}"
+fi
+echo "Page deployment gas total: ${page_deploy_gas}"
+if [[ "${MODE}" == "unrolled-sharded" ]]; then
+  echo "Dispatcher deployment gas: ${verifier_deploy_gas}"
+else
+  echo "Verifier deployment gas: ${verifier_deploy_gas}"
+fi
+echo "Total deployment gas: $((page_deploy_gas + verifier_deploy_gas))"
 echo "Verifier address: ${verifier_address}"
-

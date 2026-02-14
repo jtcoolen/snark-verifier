@@ -16,9 +16,11 @@ SUMMARY_PATH="${ARTIFACT_DIR}/midnight_ivc_bench.json"
 : "${BASELINE_HYBRID_PAGE_BYTES:=717668}"
 : "${BASELINE_COMPACT_CALL_GAS:=7564158}"
 : "${BASELINE_COMPACT_PROGRAM_WORDS:=27517}"
+: "${MAX_UNROLLED_SHARDED_CALL_GAS:=1600000}"
 : "${EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES:=24576}"
 : "${EVM_INITCODE_SIZE_LIMIT_BYTES:=49152}"
-: "${REQUIRE_UNROLLED_DEPLOYABLE:=1}"
+: "${REQUIRE_UNROLLED_DEPLOYABLE:=0}"
+: "${REQUIRE_UNROLLED_SHARDED_DEPLOYABLE:=1}"
 
 mkdir -p "${RUN_DIR}" "${ARTIFACT_DIR}"
 
@@ -45,8 +47,16 @@ unrolled_runtime_within_limit="$(jq -r '.unrolled.runtime_code_within_limit // e
 unrolled_initcode_within_limit="$(jq -r '.unrolled.initcode_within_limit // empty' "${SUMMARY_PATH}")"
 unrolled_call_gas="$(jq -r '.unrolled.revm.call_gas // empty' "${SUMMARY_PATH}")"
 unrolled_deploy_gas="$(jq -r '.unrolled.revm.deployment_gas // empty' "${SUMMARY_PATH}")"
+unrolled_sharded_call_gas="$(jq -r '.unrolled_sharded.revm.call_gas // empty' "${SUMMARY_PATH}")"
+unrolled_sharded_dispatcher_runtime_bytes="$(jq -r '.unrolled_sharded.dispatcher_runtime_code_bytes // empty' "${SUMMARY_PATH}")"
+unrolled_sharded_dispatcher_initcode_bytes="$(jq -r '.unrolled_sharded.dispatcher_initcode_bytes // empty' "${SUMMARY_PATH}")"
+unrolled_sharded_dispatcher_runtime_within_limit="$(jq -r '.unrolled_sharded.dispatcher_runtime_code_within_limit // empty' "${SUMMARY_PATH}")"
+unrolled_sharded_dispatcher_initcode_within_limit="$(jq -r '.unrolled_sharded.dispatcher_initcode_within_limit // empty' "${SUMMARY_PATH}")"
+unrolled_sharded_all_shard_runtime_within_limit="$(jq -r '.unrolled_sharded.all_shard_runtime_within_limit // empty' "${SUMMARY_PATH}")"
+unrolled_sharded_all_shard_initcode_within_limit="$(jq -r '.unrolled_sharded.all_shard_initcode_within_limit // empty' "${SUMMARY_PATH}")"
+unrolled_sharded_shard_count="$(jq -r '.unrolled_sharded.shard_count // empty' "${SUMMARY_PATH}")"
 
-for metric in hybrid_call_gas hybrid_page_bytes compact_call_gas compact_program_words compact_page_bytes unrolled_runtime_bytes unrolled_initcode_bytes; do
+for metric in hybrid_call_gas hybrid_page_bytes compact_call_gas compact_program_words compact_page_bytes unrolled_runtime_bytes unrolled_initcode_bytes unrolled_sharded_dispatcher_runtime_bytes unrolled_sharded_dispatcher_initcode_bytes unrolled_sharded_shard_count; do
   value="${!metric}"
   if [[ -z "${value}" || ! "${value}" =~ ^[0-9]+$ ]]; then
     echo "Missing or non-numeric metric '${metric}' in ${SUMMARY_PATH}" >&2
@@ -60,6 +70,30 @@ if [[ "${unrolled_runtime_within_limit}" != "true" && "${unrolled_runtime_within
   else
     unrolled_runtime_within_limit="false"
   fi
+fi
+if [[ -n "${unrolled_sharded_call_gas}" && ! "${unrolled_sharded_call_gas}" =~ ^[0-9]+$ ]]; then
+  echo "Missing or non-numeric unrolled_sharded_call_gas in ${SUMMARY_PATH}" >&2
+  exit 1
+fi
+if [[ "${unrolled_sharded_dispatcher_runtime_within_limit}" != "true" && "${unrolled_sharded_dispatcher_runtime_within_limit}" != "false" ]]; then
+  if (( unrolled_sharded_dispatcher_runtime_bytes <= EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES )); then
+    unrolled_sharded_dispatcher_runtime_within_limit="true"
+  else
+    unrolled_sharded_dispatcher_runtime_within_limit="false"
+  fi
+fi
+if [[ "${unrolled_sharded_dispatcher_initcode_within_limit}" != "true" && "${unrolled_sharded_dispatcher_initcode_within_limit}" != "false" ]]; then
+  if (( unrolled_sharded_dispatcher_initcode_bytes <= EVM_INITCODE_SIZE_LIMIT_BYTES )); then
+    unrolled_sharded_dispatcher_initcode_within_limit="true"
+  else
+    unrolled_sharded_dispatcher_initcode_within_limit="false"
+  fi
+fi
+if [[ "${unrolled_sharded_all_shard_runtime_within_limit}" != "true" && "${unrolled_sharded_all_shard_runtime_within_limit}" != "false" ]]; then
+  unrolled_sharded_all_shard_runtime_within_limit="false"
+fi
+if [[ "${unrolled_sharded_all_shard_initcode_within_limit}" != "true" && "${unrolled_sharded_all_shard_initcode_within_limit}" != "false" ]]; then
+  unrolled_sharded_all_shard_initcode_within_limit="false"
 fi
 if [[ "${unrolled_initcode_within_limit}" != "true" && "${unrolled_initcode_within_limit}" != "false" ]]; then
   if (( unrolled_initcode_bytes <= EVM_INITCODE_SIZE_LIMIT_BYTES )); then
@@ -76,6 +110,11 @@ max_compact_call_gas=$(( (BASELINE_COMPACT_CALL_GAS * 102 + 99) / 100 ))
 echo "Key metrics:"
 echo "  unrolled runtime bytes: ${unrolled_runtime_bytes} (limit ${EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES}; within_limit=${unrolled_runtime_within_limit})"
 echo "  unrolled initcode bytes: ${unrolled_initcode_bytes} (limit ${EVM_INITCODE_SIZE_LIMIT_BYTES}; within_limit=${unrolled_initcode_within_limit})"
+echo "  unrolled-sharded shard count: ${unrolled_sharded_shard_count}"
+echo "  unrolled-sharded dispatcher runtime bytes: ${unrolled_sharded_dispatcher_runtime_bytes} (limit ${EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES}; within_limit=${unrolled_sharded_dispatcher_runtime_within_limit})"
+echo "  unrolled-sharded dispatcher initcode bytes: ${unrolled_sharded_dispatcher_initcode_bytes} (limit ${EVM_INITCODE_SIZE_LIMIT_BYTES}; within_limit=${unrolled_sharded_dispatcher_initcode_within_limit})"
+echo "  unrolled-sharded all shard runtime within limit: ${unrolled_sharded_all_shard_runtime_within_limit}"
+echo "  unrolled-sharded all shard initcode within limit: ${unrolled_sharded_all_shard_initcode_within_limit}"
 if [[ -n "${unrolled_deploy_gas}" ]]; then
   echo "  unrolled deployment gas: ${unrolled_deploy_gas}"
 fi
@@ -87,6 +126,9 @@ echo "  compact page bytes: ${compact_page_bytes}"
 echo "  compact call gas: ${compact_call_gas}"
 echo "  hybrid page bytes: ${hybrid_page_bytes}"
 echo "  hybrid call gas: ${hybrid_call_gas}"
+if [[ -n "${unrolled_sharded_call_gas}" ]]; then
+  echo "  unrolled-sharded call gas: ${unrolled_sharded_call_gas} (max ${MAX_UNROLLED_SHARDED_CALL_GAS})"
+fi
 
 echo "Regression checks:"
 echo "  hybrid call gas:   ${hybrid_call_gas} (max ${max_hybrid_call_gas}; baseline ${BASELINE_HYBRID_CALL_GAS})"
@@ -111,6 +153,10 @@ if (( compact_program_words > BASELINE_COMPACT_PROGRAM_WORDS )); then
   echo "FAIL: compact program words did not decrease vs baseline" >&2
   fail=1
 fi
+if [[ -n "${unrolled_sharded_call_gas}" ]] && (( unrolled_sharded_call_gas > MAX_UNROLLED_SHARDED_CALL_GAS )); then
+  echo "FAIL: unrolled-sharded call gas exceeds target (${MAX_UNROLLED_SHARDED_CALL_GAS})" >&2
+  fail=1
+fi
 if [[ "${REQUIRE_UNROLLED_DEPLOYABLE}" == "1" ]]; then
   if [[ "${unrolled_runtime_within_limit}" != "true" ]]; then
     echo "FAIL: unrolled runtime exceeds EIP-170 contract size limit (${EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES} bytes)" >&2
@@ -118,6 +164,24 @@ if [[ "${REQUIRE_UNROLLED_DEPLOYABLE}" == "1" ]]; then
   fi
   if [[ "${unrolled_initcode_within_limit}" != "true" ]]; then
     echo "FAIL: unrolled initcode exceeds EIP-3860 initcode size limit (${EVM_INITCODE_SIZE_LIMIT_BYTES} bytes)" >&2
+    fail=1
+  fi
+fi
+if [[ "${REQUIRE_UNROLLED_SHARDED_DEPLOYABLE}" == "1" ]]; then
+  if [[ "${unrolled_sharded_dispatcher_runtime_within_limit}" != "true" ]]; then
+    echo "FAIL: unrolled-sharded dispatcher runtime exceeds EIP-170 contract size limit (${EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES} bytes)" >&2
+    fail=1
+  fi
+  if [[ "${unrolled_sharded_dispatcher_initcode_within_limit}" != "true" ]]; then
+    echo "FAIL: unrolled-sharded dispatcher initcode exceeds EIP-3860 initcode size limit (${EVM_INITCODE_SIZE_LIMIT_BYTES} bytes)" >&2
+    fail=1
+  fi
+  if [[ "${unrolled_sharded_all_shard_runtime_within_limit}" != "true" ]]; then
+    echo "FAIL: at least one unrolled-sharded shard runtime exceeds EIP-170 contract size limit (${EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES} bytes)" >&2
+    fail=1
+  fi
+  if [[ "${unrolled_sharded_all_shard_initcode_within_limit}" != "true" ]]; then
+    echo "FAIL: at least one unrolled-sharded shard initcode exceeds EIP-3860 initcode size limit (${EVM_INITCODE_SIZE_LIMIT_BYTES} bytes)" >&2
     fail=1
   fi
 fi
