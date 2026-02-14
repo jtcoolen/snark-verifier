@@ -45,6 +45,7 @@ use midnight_proofs::{
     transcript::{CircuitTranscript, Transcript},
 };
 use rand::rngs::OsRng;
+use serde_json::json;
 use snark_verifier_sdk::{
     midnight_adapter::MidnightProofBundle, midnight_evm_transcript::MidnightEvmHash,
 };
@@ -60,6 +61,8 @@ type CurveChip = ForeignEccChip<F, C, C, NG, NG>;
 type AssignedPoint = <CurveChip as EccInstructions<F, C>>::Point;
 
 const K: u32 = 20;
+const EIP170_RUNTIME_CODE_SIZE_LIMIT_BYTES: usize = 24_576;
+const EIP3860_INITCODE_SIZE_LIMIT_BYTES: usize = 49_152;
 
 #[cfg(feature = "revm")]
 fn extract_revm_gas(message: &str) -> Option<u64> {
@@ -497,8 +500,14 @@ fn main() {
     let hybrid_total_deployed_code =
         hybrid_runtime_code.len() + hybrid_page_sizes.iter().sum::<usize>();
     let calldata = bundle.encode_evm_calldata().expect("failed to encode EVM calldata");
+    let unrolled_runtime_within_limit =
+        runtime_bytecode.len() <= EIP170_RUNTIME_CODE_SIZE_LIMIT_BYTES;
+    let unrolled_initcode_within_limit = bytecode.len() <= EIP3860_INITCODE_SIZE_LIMIT_BYTES;
 
-    let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
+    let out_dir = std::env::var_os("MIDNIGHT_EVM_OUT_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples"));
+    std::fs::create_dir_all(&out_dir).expect("failed to create output directory");
     let solidity_path = out_dir.join("MidnightIvcVerifier.sol");
     let bytecode_path = out_dir.join("midnight_ivc.bytecode");
     let calldata_path = out_dir.join("midnight_ivc.calldata");
@@ -510,6 +519,7 @@ fn main() {
     let hybrid_runtime_path = out_dir.join("midnight_ivc_hybrid_runtime.bytecode");
     let hybrid_pages_path = out_dir.join("midnight_ivc_hybrid_pages.bytecode");
     let hybrid_manifest_path = out_dir.join("midnight_ivc_hybrid_manifest.txt");
+    let bench_summary_path = out_dir.join("midnight_ivc_bench.json");
 
     std::fs::write(&solidity_path, &solidity).expect("failed to write Solidity verifier");
     std::fs::write(&bytecode_path, format!("0x{}", hex::encode(&bytecode)))
@@ -543,11 +553,8 @@ fn main() {
         .expect("failed to write compact manifest");
     std::fs::write(&hybrid_solidity_path, &hybrid.runtime_solidity)
         .expect("failed to write hybrid Solidity verifier");
-    std::fs::write(
-        &hybrid_runtime_path,
-        format!("0x{}", hex::encode(&hybrid_runtime_deployment)),
-    )
-    .expect("failed to write hybrid verifier runtime deployment bytecode");
+    std::fs::write(&hybrid_runtime_path, format!("0x{}", hex::encode(&hybrid_runtime_deployment)))
+        .expect("failed to write hybrid verifier runtime deployment bytecode");
     let hybrid_pages_lines = hybrid
         .page_deployment_codes
         .iter()
@@ -571,6 +578,14 @@ fn main() {
     println!("proof bytes: {}", proof.len());
     println!("unrolled deployment code bytes: {}", bytecode.len());
     println!("unrolled runtime code bytes: {}", runtime_bytecode.len());
+    println!(
+        "unrolled runtime deployable (EIP-170 <= {}): {}",
+        EIP170_RUNTIME_CODE_SIZE_LIMIT_BYTES, unrolled_runtime_within_limit
+    );
+    println!(
+        "unrolled initcode deployable (EIP-3860 <= {}): {}",
+        EIP3860_INITCODE_SIZE_LIMIT_BYTES, unrolled_initcode_within_limit
+    );
     println!("compact runtime deployment code bytes: {}", compact_runtime_deployment.len());
     println!("compact verifier runtime code bytes: {}", compact_runtime_code.len());
     println!("compact page runtime sizes (bytes): {:?}", compact_page_sizes);
@@ -598,42 +613,166 @@ fn main() {
     println!("wrote {}", hybrid_pages_path.display());
     println!("wrote {}", hybrid_manifest_path.display());
 
+    let mut revm_unrolled = json!({
+        "status": "skipped",
+        "deployment_gas": null,
+        "call_gas": null,
+        "total_gas": null,
+        "error": null
+    });
+    let mut revm_compact = json!({
+        "status": "skipped",
+        "deployment_gas": null,
+        "page_deploy_gas": null,
+        "verifier_deploy_gas": null,
+        "call_gas": null,
+        "total_gas": null,
+        "error": null
+    });
+    let mut revm_hybrid = json!({
+        "status": "skipped",
+        "deployment_gas": null,
+        "page_deploy_gas": null,
+        "verifier_deploy_gas": null,
+        "call_gas": null,
+        "total_gas": null,
+        "error": null
+    });
+
     #[cfg(feature = "revm")]
     {
-        match bundle.verify_with_generated_solidity_revm() {
-            Ok(gas) => println!("revm gas: {gas}"),
+        match bundle.verify_with_generated_solidity_revm_with_metrics() {
+            Ok(metrics) => {
+                println!("revm deployment gas: {}", metrics.deployment_gas);
+                println!("revm gas: {}", metrics.call_gas);
+                revm_unrolled = json!({
+                    "status": "ok",
+                    "deployment_gas": metrics.deployment_gas,
+                    "call_gas": metrics.call_gas,
+                    "total_gas": metrics.total_gas(),
+                    "error": null
+                });
+            }
             Err(err) => {
                 let err_message = err.to_string();
                 if let Some(gas) = extract_revm_gas(&err_message) {
                     println!("revm gas (reverted): {gas}");
+                    revm_unrolled["call_gas"] = json!(gas);
                 }
                 println!("revm verification failed: {err_message}");
+                revm_unrolled["status"] = json!("error");
+                revm_unrolled["error"] = json!(err_message);
                 println!(
                     "note: native snark-verifier EVM-transcript verification succeeded above; this indicates a local revm/precompile divergence for this large IVC verifier"
                 );
             }
         }
 
-        match bundle.verify_with_generated_solidity_revm_compact() {
-            Ok(gas) => println!("revm compact gas: {gas}"),
+        match bundle.verify_with_generated_solidity_revm_compact_with_metrics() {
+            Ok(metrics) => {
+                println!(
+                    "revm compact deployment gas: pages={} verifier={} total={}",
+                    metrics.page_deploy_gas,
+                    metrics.verifier_deploy_gas,
+                    metrics.deployment_gas()
+                );
+                println!("revm compact gas: {}", metrics.call_gas);
+                revm_compact = json!({
+                    "status": "ok",
+                    "deployment_gas": metrics.deployment_gas(),
+                    "page_deploy_gas": metrics.page_deploy_gas,
+                    "verifier_deploy_gas": metrics.verifier_deploy_gas,
+                    "call_gas": metrics.call_gas,
+                    "total_gas": metrics.total_gas(),
+                    "error": null
+                });
+            }
             Err(err) => {
                 let err_message = err.to_string();
                 if let Some(gas) = extract_revm_gas(&err_message) {
                     println!("revm compact gas (reverted): {gas}");
+                    revm_compact["call_gas"] = json!(gas);
                 }
                 println!("revm compact verification failed: {err_message}");
+                revm_compact["status"] = json!("error");
+                revm_compact["error"] = json!(err_message);
             }
         }
 
-        match bundle.verify_with_generated_solidity_revm_hybrid() {
-            Ok(gas) => println!("revm hybrid gas: {gas}"),
+        match bundle.verify_with_generated_solidity_revm_hybrid_with_metrics() {
+            Ok(metrics) => {
+                println!(
+                    "revm hybrid deployment gas: pages={} verifier={} total={}",
+                    metrics.page_deploy_gas,
+                    metrics.verifier_deploy_gas,
+                    metrics.deployment_gas()
+                );
+                println!("revm hybrid gas: {}", metrics.call_gas);
+                revm_hybrid = json!({
+                    "status": "ok",
+                    "deployment_gas": metrics.deployment_gas(),
+                    "page_deploy_gas": metrics.page_deploy_gas,
+                    "verifier_deploy_gas": metrics.verifier_deploy_gas,
+                    "call_gas": metrics.call_gas,
+                    "total_gas": metrics.total_gas(),
+                    "error": null
+                });
+            }
             Err(err) => {
                 let err_message = err.to_string();
                 if let Some(gas) = extract_revm_gas(&err_message) {
                     println!("revm hybrid gas (reverted): {gas}");
+                    revm_hybrid["call_gas"] = json!(gas);
                 }
                 println!("revm hybrid verification failed: {err_message}");
+                revm_hybrid["status"] = json!("error");
+                revm_hybrid["error"] = json!(err_message);
             }
         }
     }
+
+    let summary = json!({
+        "proof_bytes": proof.len(),
+        "calldata_bytes": calldata.len(),
+        "unrolled": {
+            "deployment_code_bytes": bytecode.len(),
+            "runtime_code_bytes": runtime_bytecode.len(),
+            "runtime_code_limit_bytes": EIP170_RUNTIME_CODE_SIZE_LIMIT_BYTES,
+            "runtime_code_within_limit": unrolled_runtime_within_limit,
+            "initcode_limit_bytes": EIP3860_INITCODE_SIZE_LIMIT_BYTES,
+            "initcode_within_limit": unrolled_initcode_within_limit,
+            "revm": revm_unrolled,
+        },
+        "compact": {
+            "opcode_version": compact.manifest.opcode_version,
+            "runtime_deployment_code_bytes": compact_runtime_deployment.len(),
+            "runtime_code_bytes": compact_runtime_code.len(),
+            "program_words": compact.manifest.program_words,
+            "page_count": compact.page_runtime_codes.len(),
+            "page_size_bytes": compact.manifest.page_size_bytes,
+            "page_runtime_sizes_bytes": compact_page_sizes,
+            "page_runtime_total_bytes": compact.page_runtime_codes.iter().map(|page| page.len()).sum::<usize>(),
+            "total_deployed_runtime_code_bytes": compact_total_deployed_code,
+            "revm": revm_compact,
+        },
+        "hybrid": {
+            "opcode_version": hybrid.manifest.opcode_version,
+            "runtime_deployment_code_bytes": hybrid_runtime_deployment.len(),
+            "runtime_code_bytes": hybrid_runtime_code.len(),
+            "program_words": hybrid.manifest.program_words,
+            "page_count": hybrid.page_runtime_codes.len(),
+            "page_size_bytes": hybrid.manifest.page_size_bytes,
+            "page_runtime_sizes_bytes": hybrid_page_sizes,
+            "page_runtime_total_bytes": hybrid.page_runtime_codes.iter().map(|page| page.len()).sum::<usize>(),
+            "total_deployed_runtime_code_bytes": hybrid_total_deployed_code,
+            "revm": revm_hybrid,
+        }
+    });
+    std::fs::write(
+        &bench_summary_path,
+        serde_json::to_string_pretty(&summary).expect("failed to serialize bench summary"),
+    )
+    .expect("failed to write IVC bench summary JSON");
+    println!("wrote {}", bench_summary_path.display());
+    println!("bench-summary-json={}", bench_summary_path.display());
 }
