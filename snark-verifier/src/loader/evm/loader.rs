@@ -1218,6 +1218,30 @@ impl EvmLoader {
         self.scalar(Value::Memory(ptr))
     }
 
+    /// Truncate a scalar to its low 128 bits.
+    ///
+    /// This is used by Midnight's optional `truncated-challenges` mode.
+    #[cfg(feature = "truncated-challenges")]
+    pub fn truncate_scalar_to_128(self: &Rc<Self>, scalar: &Scalar) -> Scalar {
+        let mask = U256::from(u128::MAX);
+        if let Value::Constant(constant) = scalar.value {
+            return self.scalar(Value::Constant(constant & mask));
+        }
+
+        assert!(
+            self.is_unrolled_codegen(),
+            "truncated challenge support is only implemented for unrolled codegen modes"
+        );
+
+        let ptr = self.allocate(0x20);
+        self.copy_scalar(scalar, ptr);
+        let mask_hex = hex_encode_u256(&mask);
+        self.code
+            .borrow_mut()
+            .runtime_append(format!("mstore({ptr:#x}, and(mload({ptr:#x}), {mask_hex}))"));
+        self.scalar(Value::Memory(ptr))
+    }
+
     /// Allocates a new elliptic curve point and copies the given value into it.
     pub fn copy_ec_point(self: &Rc<Self>, value: &EcPoint, ptr: usize) {
         match value.value {
