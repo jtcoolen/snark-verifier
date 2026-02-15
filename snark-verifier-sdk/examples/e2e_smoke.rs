@@ -6,9 +6,7 @@ use halo2_proofs::{halo2curves::bls12_381::Bls12, poly::kzg::commitment::ParamsK
 use rand::rngs::OsRng;
 #[cfg(feature = "revm")]
 use snark_verifier_sdk::evm::evm_verify;
-use snark_verifier_sdk::evm::{
-    gen_evm_proof_gwc, gen_evm_verifier_gwc, write_calldata,
-};
+use snark_verifier_sdk::evm::{gen_evm_proof_gwc, gen_evm_verifier_gwc, write_calldata};
 use snark_verifier_sdk::{gen_pk, CircuitExt};
 
 mod application {

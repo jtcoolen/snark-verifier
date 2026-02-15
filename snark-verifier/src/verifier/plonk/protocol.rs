@@ -279,6 +279,7 @@ where
     zn_minus_one: L::LoadedScalar,
     zn_minus_one_inv: Fraction<L::LoadedScalar>,
     identity: L::LoadedScalar,
+    identity_inv: Fraction<L::LoadedScalar>,
     lagrange: BTreeMap<i32, Fraction<L::LoadedScalar>>,
 }
 
@@ -325,11 +326,15 @@ where
             .map(|omega| Fraction::new(numer.clone() * omega, z.clone() - omega))
             .collect_vec();
 
+        let identity = z.clone();
+        let identity_inv = Fraction::one_over(identity.clone());
+
         Self {
             zn,
             zn_minus_one,
             zn_minus_one_inv,
-            identity: z.clone(),
+            identity,
+            identity_inv,
             lagrange: lagranges.into_iter().zip(lagrange_evals).collect(),
         }
     }
@@ -353,11 +358,16 @@ where
         }
     }
 
+    pub fn identity_inv(&self) -> &L::LoadedScalar {
+        self.identity_inv.evaluated()
+    }
+
     pub fn denoms(&mut self) -> impl IntoIterator<Item = &'_ mut L::LoadedScalar> {
         self.lagrange
             .iter_mut()
             .map(|(_, value)| value.denom_mut())
             .chain(iter::once(self.zn_minus_one_inv.denom_mut()))
+            .chain(iter::once(self.identity_inv.denom_mut()))
             .flatten()
     }
 
@@ -366,6 +376,7 @@ where
             .iter_mut()
             .map(|(_, value)| value)
             .chain(iter::once(&mut self.zn_minus_one_inv))
+            .chain(iter::once(&mut self.identity_inv))
             .for_each(Fraction::evaluate)
     }
 }

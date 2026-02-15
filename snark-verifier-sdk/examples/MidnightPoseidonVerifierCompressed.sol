@@ -14,210 +14,126 @@ contract Halo2Verifier {
 
             let success := true
             let f_q := 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001
-            
-        {
-            mstore(0x220, 0x000000000000000000000000000000001170cad86e5afb1d4cdd8a6251d46cbb)
-            mstore(0x240, 0x85f3261e6b1954a77492241599016e7293029133bed3f0b90f560c0ebe69606e)
-            mstore(0x260, 0x0000000000000000000000000000000013099a7835073646b79a0e9c60650132)
-            mstore(0x280, 0x247b22413b3a8674d081e73623ebaf398638b87771d9f2cda7f152b249e645c3)
-        }
-
-        {
-            mstore(0x2a0, 0x000000000000000000000000000000000b282d617a91f4d1ff00a6243771931a)
-            mstore(0x2c0, 0xe5a512f21813fc3c2d8724a093ce5df71ca2eb14ac60b2acacab27d9ffe9fd1e)
-            mstore(0x2e0, 0x000000000000000000000000000000000d83c7f6a5c77064ad92bda194d35224)
-            mstore(0x300, 0x976fcdbf14687aecd071c20ffe00e2465d42835d8fcbfa84e4238002614e0ab4)
-        }
-
-        {
-            mstore(0x320, 0x000000000000000000000000000000000e4febceb0c75e74bb4a82858851388b)
-            mstore(0x340, 0x7dfc6ab427eb3efca57fb33f8061ad19151067e197b7b80cf133048d05906780)
-            mstore(0x360, 0x000000000000000000000000000000000f94878a2f29befce1d34c2c6cacd7b7)
-            mstore(0x380, 0xf974e1aeebc66250b22b40483ac0aef0fd63f81ecdc5ec77e86b0baf47ee4161)
-        }
-
-        {
-            mstore(0x3a0, 0x0000000000000000000000000000000010410d2f52f549d810c0b20762b3d23f)
-            mstore(0x3c0, 0x492faf9c0412566918320fa1bd1a2f866de371c682ce58291298da7054c15e37)
-            mstore(0x3e0, 0x0000000000000000000000000000000005bb60e740941076894a635a8b68b2ad)
-            mstore(0x400, 0x0cafe4dfb5b26b266e3d7f90648df3316eeac10a8552daa2e10139e558e89c8b)
-        }
-
-        {
-            mstore(0x420, 0x000000000000000000000000000000001732e93c22240fc9b25ada31c744ec43)
-            mstore(0x440, 0x81c24342543e1d9207d676cab7b4748bd0f3bd207c0e0f58b01cdfaf06bf398a)
-            mstore(0x460, 0x000000000000000000000000000000000888fdf5fb7001185488816bf214db93)
-            mstore(0x480, 0x91fc843d2e6e2122b16c6cb2db555e5462c37d5c33f7618db3fc2c282be965b3)
-        }
-
-        {
-            mstore(0x4a0, 0x000000000000000000000000000000001312bdc240cd2373467c0335ef191197)
-            mstore(0x4c0, 0xf8128d4d4025c77c934160e876b41236cd5104c8b234fea21db0fa4aaebf2de3)
-            mstore(0x4e0, 0x0000000000000000000000000000000008a756827bc26e82b27713959e4f0fd4)
-            mstore(0x500, 0x024d331264b2d9d864b723eeebdcb9037ce00efaae2d8692b843fdffb9fe0be7)
-        }
-
-        {
-            mstore(0x520, 0x000000000000000000000000000000000fa4a6b7754886e78dd0e9068ee9049a)
-            mstore(0x540, 0x6175fee991b60a8a7fbf1bf731d90b3160c7f2fc49c8d743236961dd105254d6)
-            mstore(0x560, 0x0000000000000000000000000000000019b9ae84f878111bd3b7d04fdd1f9b4c)
-            mstore(0x580, 0x4610f2b7e9f9e5c8fda9a0c7bbc45fb4ed59209693fffc3fa8d1232bd86d18ea)
-        }
-
-        {
-            mstore(0x5a0, 0x000000000000000000000000000000000e8076d8e749c7bfe5af53cb7b41f713)
-            mstore(0x5c0, 0xa3c91571447d7e154d609b92fd23b751dac284102cd1c819e5450651b381ba07)
-            mstore(0x5e0, 0x00000000000000000000000000000000010fd8233696eb2b819137499e8cf259)
-            mstore(0x600, 0x538dc547287695ab7c92407048f8cfc0e2dcf62915af2a0025a400337fecfcf3)
-        }
-
-        {
-            mstore(0x620, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x640, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x660, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x680, 0x0000000000000000000000000000000000000000000000000000000000000000)
-        }
-
-        {
-            mstore(0x6a0, 0x000000000000000000000000000000001124166c5b5a37887b5bbe342f8ac8b9)
-            mstore(0x6c0, 0x3954dd3896331fee30e23578b069fafdf287b3d2f722d56627e112b870355668)
-            mstore(0x6e0, 0x00000000000000000000000000000000075c264eefdba228713189d50699f41a)
-            mstore(0x700, 0xc7d530221425801ccab07a64e636ff31dc04928d4ada7d7069b105b88f179b4f)
-        }
-
-        {
-            mstore(0x720, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x740, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x760, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x780, 0x0000000000000000000000000000000000000000000000000000000000000000)
-        }
-
-        {
-            mstore(0x7a0, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x7c0, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x7e0, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x800, 0x0000000000000000000000000000000000000000000000000000000000000000)
-        }
-
-        {
-            mstore(0x820, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x840, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x860, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x880, 0x0000000000000000000000000000000000000000000000000000000000000000)
-        }
-
-        {
-            mstore(0x8a0, 0x0000000000000000000000000000000004406ed3f7dd1a67cfd8826477766644)
-            mstore(0x8c0, 0x6ebf00fbad53877f5fd6d1a2038b5d8df988079e1564589446724a5ed5f3e6ee)
-            mstore(0x8e0, 0x000000000000000000000000000000001501329004b8a8f367268386cdfcf31a)
-            mstore(0x900, 0xcde2feee42a0b6a896f5d39df5c6058d4f52e3f757fb5c80f8b5c17ca657f100)
-        }
-
-        {
-            mstore(0x920, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x940, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x960, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x980, 0x0000000000000000000000000000000000000000000000000000000000000000)
-        }
-
-        {
-            mstore(0x9a0, 0x000000000000000000000000000000000144f9dfdcc72389bf9a825edb32d7a4)
-            mstore(0x9c0, 0x904eafce4112dae3fc92be52ff83fafbe5ad9867507ec615588df15d5e9a0633)
-            mstore(0x9e0, 0x0000000000000000000000000000000010f4bbdbfed0d96a62f950f7a988c3a2)
-            mstore(0xa00, 0xeb7b8154f8e9ca0a1b147830f3f4dd121926a3a64eb4dcc905f3e516ad497c50)
-        }
-
-        {
-            mstore(0xa20, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0xa40, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0xa60, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0xa80, 0x0000000000000000000000000000000000000000000000000000000000000000)
-        }
-
-        {
-            mstore(0xaa0, 0x000000000000000000000000000000000f4f2f406c3962d61843db8bc1559573)
-            mstore(0xac0, 0x973da3cc13073becc1ff670c2b256f5331d14b95c51bc52ea4605be1c889884e)
-            mstore(0xae0, 0x0000000000000000000000000000000018b6cf86bd879fbe05412ca1d900cfbb)
-            mstore(0xb00, 0xba180f1b0439e77500ab19a03431abdceb676dbfec8b52416afa4babf876cf75)
-        }
-
-        {
-            mstore(0xb20, 0x000000000000000000000000000000000080fbcf63e3fb6c7acbe235e784e8a6)
-            mstore(0xb40, 0x44437be5f54b2fb04d80e95ce7db6bcbb3d909cf63d67337d5c631c5ab7410d3)
-            mstore(0xb60, 0x000000000000000000000000000000000831a0cfa3f0a4adb5e246db4d037831)
-            mstore(0xb80, 0x8b978488f0891c4a40ce1aa050c990fb50adbb0b3c29a7aae5d88c93a20bf6ca)
-        }
-
-        {
-            mstore(0xba0, 0x00000000000000000000000000000000186cb8140666759f42c0c1782a42c860)
-            mstore(0xbc0, 0x9bba633d9d947fa918647fb631e8d657c7068f2a2e8654d49052b88311593f24)
-            mstore(0xbe0, 0x0000000000000000000000000000000017871082b594ec733486a7885afecf37)
-            mstore(0xc00, 0x9d80478256ebb7c90b49078382b8fbb032df65d9b4c79fe8634a85aa490b7137)
-        }
-
-        {
-            mstore(0xc20, 0x00000000000000000000000000000000166547db70fb617b12b6e23da0a43fbc)
-            mstore(0xc40, 0x84e2ee7a0c11367fa660281c402efbfbd3a3aa3f8c18a803095cd5f982aa4c7e)
-            mstore(0xc60, 0x000000000000000000000000000000000d3f94f097b7cf2ae913039e6d28eb9a)
-            mstore(0xc80, 0xf8ebb581e0ca6d876ee33a62fb241618bce02ad27104e731c248f8a96809fda2)
-        }
-
-        {
-            mstore(0xca0, 0x0000000000000000000000000000000010e49bac65ece98d1d6262b819bc95cc)
-            mstore(0xcc0, 0x12daaccb14f1bc77801d1e6be99e904c767128e69d9e22212777d2c7b8926ca1)
-            mstore(0xce0, 0x0000000000000000000000000000000015827ef34173b456481b6fbb898a4734)
-            mstore(0xd00, 0x0f77ce253fb452e162700c411d90f02756cf5f63625660b9d672205b7a8af36b)
-        }
-
-        {
-            mstore(0xd20, 0x00000000000000000000000000000000092c5fcecf93fca32c4b25f16893a0a4)
-            mstore(0xd40, 0x08232d283d8fe5a60aaf667f95a0b5fa1c97b02402d75bc2565cdc188234ecb6)
-            mstore(0xd60, 0x000000000000000000000000000000000946f9122b38db27ba559527d941a159)
-            mstore(0xd80, 0x5a0f86769bda59fca94944c944e897a54268958fe22e42d88e638e037826fa79)
-        }
-
-        {
-            mstore(0xda0, 0x0000000000000000000000000000000009d8e400415f21f4d08aeebcddac018f)
-            mstore(0xdc0, 0x38c207ec396fa2248a74171ce11b50f1262d5b3130910e6aa8312225a128de8d)
-            mstore(0xde0, 0x000000000000000000000000000000001542095c996cf3369d4d6f88d893bae5)
-            mstore(0xe00, 0x02094511259e4e4ebab04ddd67734c50bf045dec3740d30d656a2c144b765179)
-        }
-
-        {
-            mstore(0xe20, 0x0000000000000000000000000000000008f4d51fb39849ae50e1c0db9cd179fc)
-            mstore(0xe40, 0x5ef96a736a4ef378515789a9ea86d830217d82751480a3dcc049cf0d4969e627)
-            mstore(0xe60, 0x00000000000000000000000000000000090e52a50a2b6b9b38d47c26946649a0)
-            mstore(0xe80, 0x3ba16a6224830c3a165575ed836ba6284df33c457bcadb616c4a057e27a99bbe)
-        }
-
-        {
-            mstore(0xea0, 0x000000000000000000000000000000000644efebda38cae6c5ad6786e0319bd5)
-            mstore(0xec0, 0x760b894d26980802774573f9b4205bb9f93cde2549eb6dd127a073c87181afaf)
-            mstore(0xee0, 0x0000000000000000000000000000000009bcd759d0b85c8658be2dfa7e0cc467)
-            mstore(0xf00, 0x30b399b8e3637260d49d71444f98cf9ca5490ccc8b1f161a86e4235120cfc289)
-        }
-
-        {
-            mstore(0xf20, 0x000000000000000000000000000000000a15bb85f22d1e245aef851c305b5492)
-            mstore(0xf40, 0xaab756d2c6fef19d416e1392812cfc063413be7c72b017c17f28384f995704af)
-            mstore(0xf60, 0x0000000000000000000000000000000015f3f5a42d569f4f2077101283983e3f)
-            mstore(0xf80, 0xa544756951718a6ed54e4ef6c7129547099976298cc6da7c9dd73734e02216cf)
-        }
-
-        {
-            mstore(0xfc0, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0xfe0, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x1000, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x1020, 0x0000000000000000000000000000000000000000000000000000000000000000)
-        }
+            mstore(0x220, 0x00000000000000000000000000000000041b3b38e38b31b42aee4db96d806074)
+mstore(0x240, 0xf3fd8755cc47af9e83f581c73e0c63cfe079446e3ac3ea7482f6371a27b4d3dc)
+mstore(0x260, 0x000000000000000000000000000000000c8a4bb69ac32ed788b1fd39f334ece8)
+mstore(0x280, 0xd18081ff9e6c2b0a34ae60ee1b8a32225f675a9e56d0ddee36d35c80404db587)
+mstore(0x2a0, 0x0000000000000000000000000000000010ac035be7f5fd5fbec9bfa5334305a7)
+mstore(0x2c0, 0x122ae1a1bd9d8d44485165339b252773c321e8a070c5a93a6953d9aca3f5b570)
+mstore(0x2e0, 0x000000000000000000000000000000000ded1a455eef3f8f2f3ce2210dc0cf29)
+mstore(0x300, 0x26ea631bde581814f8697ddbdbaad32bf48373794a30434e1f8ed1d303c0f519)
+mstore(0x320, 0x000000000000000000000000000000000c3ede3559a1ab90632474158c531ab5)
+mstore(0x340, 0xfb1c4af516743acb86052a29dbe94f201a8626443c0d06f60b4dfb88155590b0)
+mstore(0x360, 0x000000000000000000000000000000000b92266037e281ab90f1a4b47fe96dcf)
+mstore(0x380, 0x9b8fdfe1996ab651e4eb9dc649a77833b5776546f78197a45495547961a5c5e2)
+mstore(0x3a0, 0x000000000000000000000000000000001532aead68ae07a439c65e161de72fad)
+mstore(0x3c0, 0x0dde016f259200c304df91625755623c16456175b1eab113bd3c83a0895f4904)
+mstore(0x3e0, 0x000000000000000000000000000000000e1d3b3ea57c9a5dcded0927a2056225)
+mstore(0x400, 0x5dce2fe15a4de6744ee825b05dd6c1bba97c773c9a53b7a7feb0836aed867f70)
+mstore(0x420, 0x00000000000000000000000000000000101e99c1f40f53fb481ba6a3427ac6ee)
+mstore(0x440, 0x89385aa378a3ed656445498190a5f6e79edde122bf927d46e764b5ccd866ac5e)
+mstore(0x460, 0x00000000000000000000000000000000099d42240de2fb056d224209a7adf76c)
+mstore(0x480, 0x6d4b1ad40c9222cda4561f8e44ba358e06a8a4a59ab1128525bb05ea3719891e)
+mstore(0x4a0, 0x0000000000000000000000000000000007c3ec8c1d004c438817ffec17a7d399)
+mstore(0x4c0, 0xe4f414a28b5fcc8071a29d6e11847e3e7582e614a1d8ff1299ef2fa375c6f2c5)
+mstore(0x4e0, 0x000000000000000000000000000000001162067f31d484843144e92f2397b48a)
+mstore(0x500, 0x2efc079a2a31521dd41c2c8ef13613375fb961a948ee4259d395da9ad98f1867)
+mstore(0x520, 0x0000000000000000000000000000000008263739e8c19f10c1de91f241717698)
+mstore(0x540, 0xec2171184a3389bc96dd91c4e7021fd9c929b253553df9ff1d4774807ba48f5d)
+mstore(0x560, 0x0000000000000000000000000000000006280ab78e49807ee0776a85cb29887a)
+mstore(0x580, 0xd7ae251df1a194143f33e7a32abba74c4df92e97563605a79878c2d377d236f9)
+mstore(0x5a0, 0x0000000000000000000000000000000004f9cec1be5a44374426246c8e4af4fe)
+mstore(0x5c0, 0x775bc89b0e77c6f6d5feebbe0215de767c07f70a26bca3039d96ca131650d12f)
+mstore(0x5e0, 0x00000000000000000000000000000000153059eb1f9baad4d3edfae747b193c3)
+mstore(0x600, 0xb977387b7de1d6c24670111d7dd168bd5889086f21b1b33669309eb11c588c1f)
+mstore(0x620, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x640, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x660, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x680, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x6a0, 0x0000000000000000000000000000000017cd99443ec64982cacf37c2e00df7d9)
+mstore(0x6c0, 0xef9349adbe8bc8857d788b2c5e938f3bfb1c142d1bc6a5f3d10229ff6113558f)
+mstore(0x6e0, 0x00000000000000000000000000000000165824c379719a179e87e46632051309)
+mstore(0x700, 0xa4803288130f5c2e6c13b02ab1237eb7f73df471297c66dcb8d8daee83d60cb6)
+mstore(0x720, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x740, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x760, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x780, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x7a0, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x7c0, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x7e0, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x800, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x820, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x840, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x860, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x880, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x8a0, 0x0000000000000000000000000000000001ea02a01f71c8d38d3432139ee20af1)
+mstore(0x8c0, 0xaac9259303b48e4a29e0e8545447eee8720cb8dae4cbdaacc6a01beebb0d2b35)
+mstore(0x8e0, 0x000000000000000000000000000000001058b7931476e829786f4fd97ce61995)
+mstore(0x900, 0xb2d52640eb379ea610340f1cb6212e69f4d702b2c12080413ce5c1122079ecb6)
+mstore(0x920, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x940, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x960, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x980, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x9a0, 0x00000000000000000000000000000000075b506f6239b6376ee4baa8a57d3b3e)
+mstore(0x9c0, 0x505f27cc8c984b53a630903a8ced60cc71f55de6de2195f727ae1669488438f0)
+mstore(0x9e0, 0x0000000000000000000000000000000010de43b027029e746840e23c715e5ffb)
+mstore(0xa00, 0x385d130a1c5dc73d7c1ee6696dc1a468b892538de3b66e3481ca6a9f4ae477dd)
+mstore(0xa20, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0xa40, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0xa60, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0xa80, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0xaa0, 0x00000000000000000000000000000000033b48b104c9ccb3c80e6cae2d91d45e)
+mstore(0xac0, 0x14446ee194bab644c5f8064ee542371d6e162c69057dd0a1694ca8bda2bbe5aa)
+mstore(0xae0, 0x00000000000000000000000000000000150734247e95b726adf2ea102f11462e)
+mstore(0xb00, 0x664fa43d20860959b465072841e573819da118644d6738e58ac41bb1ba00e766)
+mstore(0xb20, 0x0000000000000000000000000000000009d02736a674c275efe35e6c0ba34ab2)
+mstore(0xb40, 0x32259f7280bbc11027c2fedf2df5b8e912a21d470516e5967ab339724411236f)
+mstore(0xb60, 0x000000000000000000000000000000000282bde118b07c897970cafadff71bd6)
+mstore(0xb80, 0x637822f5a494dacca0d1c2d1b9e4154e5c37dbbaf207aef0e9e5bad87fa7b069)
+mstore(0xba0, 0x0000000000000000000000000000000004031172eda8f96609e97ac46ebef039)
+mstore(0xbc0, 0xff88ce8470298fc1f49198bcaf4b5c473101fcd1a89acba3c38341b0fb9697eb)
+mstore(0xbe0, 0x0000000000000000000000000000000000e44acc9f3b87c6843bb08691bc7eb2)
+mstore(0xc00, 0x5db2cc2bf5966da3bc461c1186337bb894ccd9483c56599a0aa9e953eb464dc9)
+mstore(0xc20, 0x0000000000000000000000000000000015af7bc0200332a3ac3de5406a02768d)
+mstore(0xc40, 0x39a7e244ff1d75b912efcc8fc22ee849c96dfb648ace6b8389c64e1d2765651d)
+mstore(0xc60, 0x0000000000000000000000000000000016b05f0b594434ee5bb050d40e5b82b0)
+mstore(0xc80, 0x16b5d9d1d950e7c238a62349eae1a270aa331cb5e2b46d50ea37059287db62ac)
+mstore(0xca0, 0x000000000000000000000000000000000804d35b9a1bbad92b5964714f5590dd)
+mstore(0xcc0, 0xed3aefdeb3eac498ac28fb500aabd7e32000fb3b2d57f98030c078cb24b46042)
+mstore(0xce0, 0x00000000000000000000000000000000001703264f0bc926e997efbe4c9521f0)
+mstore(0xd00, 0x359e9c9d70598694d14ebd45a223930cd05712a6892933a6fef380e9d34721fc)
+mstore(0xd20, 0x0000000000000000000000000000000000031c6a392be679d3ea4af2ab154bdb)
+mstore(0xd40, 0xc5d2dae09a9a70e04774dc8c7401dfa04247dd2d635fdf90bae4cce87f024f37)
+mstore(0xd60, 0x0000000000000000000000000000000018eaa12b980a91ddc2c3551a22a6c132)
+mstore(0xd80, 0x21d42e4d187f72a370cc204e5ebec780291f80e8fda995b5a7dd35010a156e4d)
+mstore(0xda0, 0x000000000000000000000000000000000bb34630cdb822b5a16b2c082601d6a3)
+mstore(0xdc0, 0x4d07e8a3c5cde392199490593d8087c833e447a5c0cd5e80173a7d6b311a7ff4)
+mstore(0xde0, 0x0000000000000000000000000000000004aa468ce0c8743f96ae6eb7d49374c9)
+mstore(0xe00, 0xd01dc61edf641dc1cfcfd6a490aab008936c8bf7a5752883ad053449c5bdd368)
+mstore(0xe20, 0x00000000000000000000000000000000123c5910d99dc7b5c66eb9d4b2dc74e0)
+mstore(0xe40, 0xc0326726eade6c414c70fac92e4a4feea9fe9044b3fe8c71e98ff8125e5bfad5)
+mstore(0xe60, 0x0000000000000000000000000000000004e5c5b78998a9144462b65fb9b13bc1)
+mstore(0xe80, 0x367fb70b42afe0290bff7acecfe6b51ae14201173563dca0231b57b1049906b7)
+mstore(0xea0, 0x00000000000000000000000000000000057b772f8cb125acfb37ee03d55ea12d)
+mstore(0xec0, 0x11ceb8ae106e8dd84b35b3d1482c35613b0d3f712475ad568f7a72554c6fc995)
+mstore(0xee0, 0x0000000000000000000000000000000001ec0f05e2de1fb4c9677505f0b17d3d)
+mstore(0xf00, 0xc6c524f4af3e4dc8b906185d6a2f603b9b16b13c9a85acd866cc8639f2e8dde1)
+mstore(0xf20, 0x0000000000000000000000000000000007fe505e2f103048bad3b173b6456d6a)
+mstore(0xf40, 0x1392b30938e2b265ed7f286d5897b5876765887583bd955b50ea1fc9bf02b079)
+mstore(0xf60, 0x000000000000000000000000000000001486a82a1f10bbfdf6e131d50df86fd0)
+mstore(0xf80, 0x159abe7a95704f721a99591c0b7198950a44b3058cb498015a2ee2a404038117)
+mstore(0xfc0, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0xfe0, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x1000, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x1020, 0x0000000000000000000000000000000000000000000000000000000000000000)
 mstore(0x1040, mod(calldataload(0x0), f_q))
-mstore(0x1060, 23028419784151240539403500789343164848746138653814563173188701058439593665262)
+mstore(0x1060, 33824681912417750056784288193663605962236179847225101020381911378169861020144)
 {
-                    mstore(0x1080, mload(0xfc0))
+                            mstore(0x1080, mload(0xfc0))
 mstore(0x10a0, mload(0xfe0))
 mstore(0x10c0, mload(0x1000))
 mstore(0x10e0, mload(0x1020))
-                }
+                        }
 mstore(0x1100, 1)
 mstore(0x1120, mload(0x1040))
 
@@ -1069,11 +985,8 @@ mstore(0x1120, mload(0x1040))
             }
         }
 mstore(0x1540, keccak256(0x1060, 1248))
-{
-            let hash := mload(0x1540)
-            mstore(0x1560, mod(hash, f_q))
-            mstore(0x1580, hash)
-        }
+mstore(0x1560, mod(mload(0x1540), f_q))
+mstore(0x1580, mload(0x1540))
 
         {
             let flag := byte(0, calldataload(0x1a8))
@@ -1287,18 +1200,12 @@ mstore(0x1540, keccak256(0x1060, 1248))
             }
         }
 mstore(0x16a0, keccak256(0x1580, 288))
-{
-            let hash := mload(0x16a0)
-            mstore(0x16c0, mod(hash, f_q))
-            mstore(0x16e0, hash)
-        }
-mstore8(5888, 1)
+mstore(0x16c0, mod(mload(0x16a0), f_q))
+mstore(0x16e0, mload(0x16a0))
+mstore8(0x1700, 1)
 mstore(0x1700, keccak256(0x16e0, 33))
-{
-            let hash := mload(0x1700)
-            mstore(0x1720, mod(hash, f_q))
-            mstore(0x1740, hash)
-        }
+mstore(0x1720, mod(mload(0x1700), f_q))
+mstore(0x1740, mload(0x1700))
 
         {
             let flag := byte(0, calldataload(0x20a))
@@ -1724,11 +1631,8 @@ mstore(0x1700, keccak256(0x16e0, 33))
             }
         }
 mstore(0x1960, keccak256(0x1740, 544))
-{
-            let hash := mload(0x1960)
-            mstore(0x1980, mod(hash, f_q))
-            mstore(0x19a0, hash)
-        }
+mstore(0x1980, mod(mload(0x1960), f_q))
+mstore(0x19a0, mload(0x1960))
 
         {
             let flag := byte(0, calldataload(0x2ce))
@@ -1942,11 +1846,8 @@ mstore(0x1960, keccak256(0x1740, 544))
             }
         }
 mstore(0x1ac0, keccak256(0x19a0, 288))
-{
-            let hash := mload(0x1ac0)
-            mstore(0x1ae0, mod(hash, f_q))
-            mstore(0x1b00, hash)
-        }
+mstore(0x1ae0, mod(mload(0x1ac0), f_q))
+mstore(0x1b00, mload(0x1ac0))
 
         {
             let flag := byte(0, calldataload(0x330))
@@ -2372,11 +2273,8 @@ mstore(0x1ac0, keccak256(0x19a0, 288))
             }
         }
 mstore(0x1d20, keccak256(0x1b00, 544))
-{
-            let hash := mload(0x1d20)
-            mstore(0x1d40, mod(hash, f_q))
-            mstore(0x1d60, hash)
-        }
+mstore(0x1d40, mod(mload(0x1d20), f_q))
+mstore(0x1d60, mload(0x1d20))
 mstore(0x1d80, mod(calldataload(0x3f4), f_q))
 mstore(0x1da0, mod(calldataload(0x414), f_q))
 mstore(0x1dc0, mod(calldataload(0x434), f_q))
@@ -2432,18 +2330,12 @@ mstore(0x23e0, mod(calldataload(0xa54), f_q))
 mstore(0x2400, mod(calldataload(0xa74), f_q))
 mstore(0x2420, mod(calldataload(0xa94), f_q))
 mstore(0x2440, keccak256(0x1d60, 1760))
-{
-            let hash := mload(0x2440)
-            mstore(0x2460, mod(hash, f_q))
-            mstore(0x2480, hash)
-        }
-mstore8(9376, 1)
+mstore(0x2460, mod(mload(0x2440), f_q))
+mstore(0x2480, mload(0x2440))
+mstore8(0x24a0, 1)
 mstore(0x24a0, keccak256(0x2480, 33))
-{
-            let hash := mload(0x24a0)
-            mstore(0x24c0, mod(hash, f_q))
-            mstore(0x24e0, hash)
-        }
+mstore(0x24c0, mod(mload(0x24a0), f_q))
+mstore(0x24e0, mload(0x24a0))
 
         {
             let flag := byte(0, calldataload(0xab4))
@@ -2551,21 +2443,15 @@ mstore(0x24a0, keccak256(0x2480, 33))
             }
         }
 mstore(0x2580, keccak256(0x24e0, 160))
-{
-            let hash := mload(0x2580)
-            mstore(0x25a0, mod(hash, f_q))
-            mstore(0x25c0, hash)
-        }
+mstore(0x25a0, mod(mload(0x2580), f_q))
+mstore(0x25c0, mload(0x2580))
 mstore(0x25e0, mod(calldataload(0xae5), f_q))
 mstore(0x2600, mod(calldataload(0xb05), f_q))
 mstore(0x2620, mod(calldataload(0xb25), f_q))
 mstore(0x2640, mod(calldataload(0xb45), f_q))
 mstore(0x2660, keccak256(0x25c0, 160))
-{
-            let hash := mload(0x2660)
-            mstore(0x2680, mod(hash, f_q))
-            mstore(0x26a0, hash)
-        }
+mstore(0x2680, mod(mload(0x2660), f_q))
+mstore(0x26a0, mload(0x2660))
 
         {
             let flag := byte(0, calldataload(0xb65))
@@ -2672,13 +2558,10 @@ mstore(0x2660, keccak256(0x25c0, 160))
                 }
             }
         }
-
-        {
-            mstore(0x2740, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x2760, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x2780, 0x0000000000000000000000000000000000000000000000000000000000000000)
-            mstore(0x27a0, 0x0000000000000000000000000000000000000000000000000000000000000000)
-        }
+mstore(0x2740, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x2760, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x2780, 0x0000000000000000000000000000000000000000000000000000000000000000)
+mstore(0x27a0, 0x0000000000000000000000000000000000000000000000000000000000000000)
 mstore(0x27c0, mulmod(mload(0x1d40), mload(0x1d40), f_q))
 mstore(0x27e0, mulmod(mload(0x27c0), mload(0x27c0), f_q))
 mstore(0x2800, mulmod(mload(0x27e0), mload(0x27e0), f_q))
@@ -3605,3206 +3488,408 @@ mstore(0x8c20, addmod(mload(0x8be0), mload(0x8c00), f_q))
 mstore(0x8c40, mulmod(mload(0x84a0), mload(0x8500), f_q))
 mstore(0x8c60, addmod(mload(0x8c20), mload(0x8c40), f_q))
 mstore(0x8c80, mulmod(1, mload(0x25a0), f_q))
-
-        {
-            mstore(0x8ca0, 0x0000000000000000000000000000000017f1d3a73197d7942695638c4fa9ac0f)
-            mstore(0x8cc0, 0xc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb)
-            mstore(0x8ce0, 0x0000000000000000000000000000000008b3f481e3aaa0f1a09e30ed741d8ae4)
-            mstore(0x8d00, 0xfcf5e095d5d00af600db18cb2c04b3edd03cc744a2888ae40caa232946c5e7e1)
-        }
+mstore(0x8ca0, 0x0000000000000000000000000000000017f1d3a73197d7942695638c4fa9ac0f)
+mstore(0x8cc0, 0xc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb)
+mstore(0x8ce0, 0x0000000000000000000000000000000008b3f481e3aaa0f1a09e30ed741d8ae4)
+mstore(0x8d00, 0xfcf5e095d5d00af600db18cb2c04b3edd03cc744a2888ae40caa232946c5e7e1)
 {
-                    mstore(0x8d20, mload(0x8ca0))
+                            mstore(0x8d20, mload(0x8ca0))
 mstore(0x8d40, mload(0x8cc0))
 mstore(0x8d60, mload(0x8ce0))
 mstore(0x8d80, mload(0x8d00))
-                }
+                        }
 mstore(0x8da0, sub(f_q, mload(0x8c60)))
-
-        {
-            let scalar := mload(0x8da0)
-            let is_inf := and(
-                and(eq(mload(0x8d20), 0), eq(mload(0x8d40), 0)),
-                and(eq(mload(0x8d60), 0), eq(mload(0x8d80), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0x8d20, 0)
-                mstore(0x8d40, 0)
-                mstore(0x8d60, 0)
-                mstore(0x8d80, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0x8d20, 0xa0, 0x8d20, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x8dc0, mload(0x8d20))
-mstore(0x8de0, mload(0x8d40))
-mstore(0x8e00, mload(0x8d60))
-mstore(0x8e20, mload(0x8d80))
-                }
-{
-                    mstore(0x8e40, mload(0xfc0))
-mstore(0x8e60, mload(0xfe0))
-mstore(0x8e80, mload(0x1000))
-mstore(0x8ea0, mload(0x1020))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0x8dc0), 0), eq(mload(0x8de0), 0)),
-                and(eq(mload(0x8e00), 0), eq(mload(0x8e20), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0x8e40), 0), eq(mload(0x8e60), 0)),
-                and(eq(mload(0x8e80), 0), eq(mload(0x8ea0), 0))
-            )
-            if lhs_inf {
-                mstore(0x8dc0, mload(0x8e40))
-                mstore(0x8de0, mload(0x8e60))
-                mstore(0x8e00, mload(0x8e80))
-                mstore(0x8e20, mload(0x8ea0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0x8dc0, 0x100, 0x8dc0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x8ec0, mload(0x12c0))
-mstore(0x8ee0, mload(0x12e0))
-mstore(0x8f00, mload(0x1300))
-mstore(0x8f20, mload(0x1320))
-                }
-mstore(0x8f40, mload(0x8540))
-
-        {
-            let scalar := mload(0x8f40)
-            let is_inf := and(
-                and(eq(mload(0x8ec0), 0), eq(mload(0x8ee0), 0)),
-                and(eq(mload(0x8f00), 0), eq(mload(0x8f20), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0x8ec0, 0)
-                mstore(0x8ee0, 0)
-                mstore(0x8f00, 0)
-                mstore(0x8f20, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0x8ec0, 0xa0, 0x8ec0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x8f60, mload(0x8dc0))
-mstore(0x8f80, mload(0x8de0))
-mstore(0x8fa0, mload(0x8e00))
-mstore(0x8fc0, mload(0x8e20))
-                }
-{
-                    mstore(0x8fe0, mload(0x8ec0))
-mstore(0x9000, mload(0x8ee0))
-mstore(0x9020, mload(0x8f00))
-mstore(0x9040, mload(0x8f20))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0x8f60), 0), eq(mload(0x8f80), 0)),
-                and(eq(mload(0x8fa0), 0), eq(mload(0x8fc0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0x8fe0), 0), eq(mload(0x9000), 0)),
-                and(eq(mload(0x9020), 0), eq(mload(0x9040), 0))
-            )
-            if lhs_inf {
-                mstore(0x8f60, mload(0x8fe0))
-                mstore(0x8f80, mload(0x9000))
-                mstore(0x8fa0, mload(0x9020))
-                mstore(0x8fc0, mload(0x9040))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0x8f60, 0x100, 0x8f60, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x9060, mload(0x1340))
-mstore(0x9080, mload(0x1360))
-mstore(0x90a0, mload(0x1380))
-mstore(0x90c0, mload(0x13a0))
-                }
-mstore(0x90e0, mload(0x8560))
-
-        {
-            let scalar := mload(0x90e0)
-            let is_inf := and(
-                and(eq(mload(0x9060), 0), eq(mload(0x9080), 0)),
-                and(eq(mload(0x90a0), 0), eq(mload(0x90c0), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0x9060, 0)
-                mstore(0x9080, 0)
-                mstore(0x90a0, 0)
-                mstore(0x90c0, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0x9060, 0xa0, 0x9060, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x9100, mload(0x8f60))
-mstore(0x9120, mload(0x8f80))
-mstore(0x9140, mload(0x8fa0))
-mstore(0x9160, mload(0x8fc0))
-                }
-{
-                    mstore(0x9180, mload(0x9060))
-mstore(0x91a0, mload(0x9080))
-mstore(0x91c0, mload(0x90a0))
-mstore(0x91e0, mload(0x90c0))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0x9100), 0), eq(mload(0x9120), 0)),
-                and(eq(mload(0x9140), 0), eq(mload(0x9160), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0x9180), 0), eq(mload(0x91a0), 0)),
-                and(eq(mload(0x91c0), 0), eq(mload(0x91e0), 0))
-            )
-            if lhs_inf {
-                mstore(0x9100, mload(0x9180))
-                mstore(0x9120, mload(0x91a0))
-                mstore(0x9140, mload(0x91c0))
-                mstore(0x9160, mload(0x91e0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0x9100, 0x100, 0x9100, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x9200, mload(0x13c0))
-mstore(0x9220, mload(0x13e0))
-mstore(0x9240, mload(0x1400))
-mstore(0x9260, mload(0x1420))
-                }
-mstore(0x9280, mload(0x8580))
-
-        {
-            let scalar := mload(0x9280)
-            let is_inf := and(
-                and(eq(mload(0x9200), 0), eq(mload(0x9220), 0)),
-                and(eq(mload(0x9240), 0), eq(mload(0x9260), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0x9200, 0)
-                mstore(0x9220, 0)
-                mstore(0x9240, 0)
-                mstore(0x9260, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0x9200, 0xa0, 0x9200, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x92a0, mload(0x9100))
-mstore(0x92c0, mload(0x9120))
-mstore(0x92e0, mload(0x9140))
-mstore(0x9300, mload(0x9160))
-                }
-{
-                    mstore(0x9320, mload(0x9200))
-mstore(0x9340, mload(0x9220))
-mstore(0x9360, mload(0x9240))
-mstore(0x9380, mload(0x9260))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0x92a0), 0), eq(mload(0x92c0), 0)),
-                and(eq(mload(0x92e0), 0), eq(mload(0x9300), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0x9320), 0), eq(mload(0x9340), 0)),
-                and(eq(mload(0x9360), 0), eq(mload(0x9380), 0))
-            )
-            if lhs_inf {
-                mstore(0x92a0, mload(0x9320))
-                mstore(0x92c0, mload(0x9340))
-                mstore(0x92e0, mload(0x9360))
-                mstore(0x9300, mload(0x9380))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0x92a0, 0x100, 0x92a0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x93a0, mload(0x1440))
-mstore(0x93c0, mload(0x1460))
-mstore(0x93e0, mload(0x1480))
-mstore(0x9400, mload(0x14a0))
-                }
-mstore(0x9420, mload(0x85a0))
-
-        {
-            let scalar := mload(0x9420)
-            let is_inf := and(
-                and(eq(mload(0x93a0), 0), eq(mload(0x93c0), 0)),
-                and(eq(mload(0x93e0), 0), eq(mload(0x9400), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0x93a0, 0)
-                mstore(0x93c0, 0)
-                mstore(0x93e0, 0)
-                mstore(0x9400, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0x93a0, 0xa0, 0x93a0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x9440, mload(0x92a0))
-mstore(0x9460, mload(0x92c0))
-mstore(0x9480, mload(0x92e0))
-mstore(0x94a0, mload(0x9300))
-                }
-{
-                    mstore(0x94c0, mload(0x93a0))
-mstore(0x94e0, mload(0x93c0))
-mstore(0x9500, mload(0x93e0))
-mstore(0x9520, mload(0x9400))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0x9440), 0), eq(mload(0x9460), 0)),
-                and(eq(mload(0x9480), 0), eq(mload(0x94a0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0x94c0), 0), eq(mload(0x94e0), 0)),
-                and(eq(mload(0x9500), 0), eq(mload(0x9520), 0))
-            )
-            if lhs_inf {
-                mstore(0x9440, mload(0x94c0))
-                mstore(0x9460, mload(0x94e0))
-                mstore(0x9480, mload(0x9500))
-                mstore(0x94a0, mload(0x9520))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0x9440, 0x100, 0x9440, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x9540, mload(0x14c0))
-mstore(0x9560, mload(0x14e0))
-mstore(0x9580, mload(0x1500))
-mstore(0x95a0, mload(0x1520))
-                }
-mstore(0x95c0, mload(0x85c0))
-
-        {
-            let scalar := mload(0x95c0)
-            let is_inf := and(
-                and(eq(mload(0x9540), 0), eq(mload(0x9560), 0)),
-                and(eq(mload(0x9580), 0), eq(mload(0x95a0), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0x9540, 0)
-                mstore(0x9560, 0)
-                mstore(0x9580, 0)
-                mstore(0x95a0, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0x9540, 0xa0, 0x9540, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x95e0, mload(0x9440))
-mstore(0x9600, mload(0x9460))
-mstore(0x9620, mload(0x9480))
-mstore(0x9640, mload(0x94a0))
-                }
-{
-                    mstore(0x9660, mload(0x9540))
-mstore(0x9680, mload(0x9560))
-mstore(0x96a0, mload(0x9580))
-mstore(0x96c0, mload(0x95a0))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0x95e0), 0), eq(mload(0x9600), 0)),
-                and(eq(mload(0x9620), 0), eq(mload(0x9640), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0x9660), 0), eq(mload(0x9680), 0)),
-                and(eq(mload(0x96a0), 0), eq(mload(0x96c0), 0))
-            )
-            if lhs_inf {
-                mstore(0x95e0, mload(0x9660))
-                mstore(0x9600, mload(0x9680))
-                mstore(0x9620, mload(0x96a0))
-                mstore(0x9640, mload(0x96c0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0x95e0, 0x100, 0x95e0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x96e0, mload(0x1620))
-mstore(0x9700, mload(0x1640))
-mstore(0x9720, mload(0x1660))
-mstore(0x9740, mload(0x1680))
-                }
-mstore(0x9760, mload(0x85e0))
-
-        {
-            let scalar := mload(0x9760)
-            let is_inf := and(
-                and(eq(mload(0x96e0), 0), eq(mload(0x9700), 0)),
-                and(eq(mload(0x9720), 0), eq(mload(0x9740), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0x96e0, 0)
-                mstore(0x9700, 0)
-                mstore(0x9720, 0)
-                mstore(0x9740, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0x96e0, 0xa0, 0x96e0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x9780, mload(0x95e0))
-mstore(0x97a0, mload(0x9600))
-mstore(0x97c0, mload(0x9620))
-mstore(0x97e0, mload(0x9640))
-                }
-{
-                    mstore(0x9800, mload(0x96e0))
-mstore(0x9820, mload(0x9700))
-mstore(0x9840, mload(0x9720))
-mstore(0x9860, mload(0x9740))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0x9780), 0), eq(mload(0x97a0), 0)),
-                and(eq(mload(0x97c0), 0), eq(mload(0x97e0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0x9800), 0), eq(mload(0x9820), 0)),
-                and(eq(mload(0x9840), 0), eq(mload(0x9860), 0))
-            )
-            if lhs_inf {
-                mstore(0x9780, mload(0x9800))
-                mstore(0x97a0, mload(0x9820))
-                mstore(0x97c0, mload(0x9840))
-                mstore(0x97e0, mload(0x9860))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0x9780, 0x100, 0x9780, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x9880, mload(0x19c0))
-mstore(0x98a0, mload(0x19e0))
-mstore(0x98c0, mload(0x1a00))
-mstore(0x98e0, mload(0x1a20))
-                }
-mstore(0x9900, mload(0x8600))
-
-        {
-            let scalar := mload(0x9900)
-            let is_inf := and(
-                and(eq(mload(0x9880), 0), eq(mload(0x98a0), 0)),
-                and(eq(mload(0x98c0), 0), eq(mload(0x98e0), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0x9880, 0)
-                mstore(0x98a0, 0)
-                mstore(0x98c0, 0)
-                mstore(0x98e0, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0x9880, 0xa0, 0x9880, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x9920, mload(0x9780))
-mstore(0x9940, mload(0x97a0))
-mstore(0x9960, mload(0x97c0))
-mstore(0x9980, mload(0x97e0))
-                }
-{
-                    mstore(0x99a0, mload(0x9880))
-mstore(0x99c0, mload(0x98a0))
-mstore(0x99e0, mload(0x98c0))
-mstore(0x9a00, mload(0x98e0))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0x9920), 0), eq(mload(0x9940), 0)),
-                and(eq(mload(0x9960), 0), eq(mload(0x9980), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0x99a0), 0), eq(mload(0x99c0), 0)),
-                and(eq(mload(0x99e0), 0), eq(mload(0x9a00), 0))
-            )
-            if lhs_inf {
-                mstore(0x9920, mload(0x99a0))
-                mstore(0x9940, mload(0x99c0))
-                mstore(0x9960, mload(0x99e0))
-                mstore(0x9980, mload(0x9a00))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0x9920, 0x100, 0x9920, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x9a20, mload(0x6a0))
-mstore(0x9a40, mload(0x6c0))
-mstore(0x9a60, mload(0x6e0))
-mstore(0x9a80, mload(0x700))
-                }
-mstore(0x9aa0, mload(0x8620))
-
-        {
-            let scalar := mload(0x9aa0)
-            let is_inf := and(
-                and(eq(mload(0x9a20), 0), eq(mload(0x9a40), 0)),
-                and(eq(mload(0x9a60), 0), eq(mload(0x9a80), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0x9a20, 0)
-                mstore(0x9a40, 0)
-                mstore(0x9a60, 0)
-                mstore(0x9a80, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0x9a20, 0xa0, 0x9a20, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x9ac0, mload(0x9920))
-mstore(0x9ae0, mload(0x9940))
-mstore(0x9b00, mload(0x9960))
-mstore(0x9b20, mload(0x9980))
-                }
-{
-                    mstore(0x9b40, mload(0x9a20))
-mstore(0x9b60, mload(0x9a40))
-mstore(0x9b80, mload(0x9a60))
-mstore(0x9ba0, mload(0x9a80))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0x9ac0), 0), eq(mload(0x9ae0), 0)),
-                and(eq(mload(0x9b00), 0), eq(mload(0x9b20), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0x9b40), 0), eq(mload(0x9b60), 0)),
-                and(eq(mload(0x9b80), 0), eq(mload(0x9ba0), 0))
-            )
-            if lhs_inf {
-                mstore(0x9ac0, mload(0x9b40))
-                mstore(0x9ae0, mload(0x9b60))
-                mstore(0x9b00, mload(0x9b80))
-                mstore(0x9b20, mload(0x9ba0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0x9ac0, 0x100, 0x9ac0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x9bc0, mload(0x420))
-mstore(0x9be0, mload(0x440))
-mstore(0x9c00, mload(0x460))
-mstore(0x9c20, mload(0x480))
-                }
-mstore(0x9c40, mload(0x8640))
-
-        {
-            let scalar := mload(0x9c40)
-            let is_inf := and(
-                and(eq(mload(0x9bc0), 0), eq(mload(0x9be0), 0)),
-                and(eq(mload(0x9c00), 0), eq(mload(0x9c20), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0x9bc0, 0)
-                mstore(0x9be0, 0)
-                mstore(0x9c00, 0)
-                mstore(0x9c20, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0x9bc0, 0xa0, 0x9bc0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x9c60, mload(0x9ac0))
-mstore(0x9c80, mload(0x9ae0))
-mstore(0x9ca0, mload(0x9b00))
-mstore(0x9cc0, mload(0x9b20))
-                }
-{
-                    mstore(0x9ce0, mload(0x9bc0))
-mstore(0x9d00, mload(0x9be0))
-mstore(0x9d20, mload(0x9c00))
-mstore(0x9d40, mload(0x9c20))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0x9c60), 0), eq(mload(0x9c80), 0)),
-                and(eq(mload(0x9ca0), 0), eq(mload(0x9cc0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0x9ce0), 0), eq(mload(0x9d00), 0)),
-                and(eq(mload(0x9d20), 0), eq(mload(0x9d40), 0))
-            )
-            if lhs_inf {
-                mstore(0x9c60, mload(0x9ce0))
-                mstore(0x9c80, mload(0x9d00))
-                mstore(0x9ca0, mload(0x9d20))
-                mstore(0x9cc0, mload(0x9d40))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0x9c60, 0x100, 0x9c60, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x9d60, mload(0x4a0))
-mstore(0x9d80, mload(0x4c0))
-mstore(0x9da0, mload(0x4e0))
-mstore(0x9dc0, mload(0x500))
-                }
-mstore(0x9de0, mload(0x8660))
-
-        {
-            let scalar := mload(0x9de0)
-            let is_inf := and(
-                and(eq(mload(0x9d60), 0), eq(mload(0x9d80), 0)),
-                and(eq(mload(0x9da0), 0), eq(mload(0x9dc0), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0x9d60, 0)
-                mstore(0x9d80, 0)
-                mstore(0x9da0, 0)
-                mstore(0x9dc0, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0x9d60, 0xa0, 0x9d60, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x9e00, mload(0x9c60))
-mstore(0x9e20, mload(0x9c80))
-mstore(0x9e40, mload(0x9ca0))
-mstore(0x9e60, mload(0x9cc0))
-                }
-{
-                    mstore(0x9e80, mload(0x9d60))
-mstore(0x9ea0, mload(0x9d80))
-mstore(0x9ec0, mload(0x9da0))
-mstore(0x9ee0, mload(0x9dc0))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0x9e00), 0), eq(mload(0x9e20), 0)),
-                and(eq(mload(0x9e40), 0), eq(mload(0x9e60), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0x9e80), 0), eq(mload(0x9ea0), 0)),
-                and(eq(mload(0x9ec0), 0), eq(mload(0x9ee0), 0))
-            )
-            if lhs_inf {
-                mstore(0x9e00, mload(0x9e80))
-                mstore(0x9e20, mload(0x9ea0))
-                mstore(0x9e40, mload(0x9ec0))
-                mstore(0x9e60, mload(0x9ee0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0x9e00, 0x100, 0x9e00, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x9f00, mload(0x520))
-mstore(0x9f20, mload(0x540))
-mstore(0x9f40, mload(0x560))
-mstore(0x9f60, mload(0x580))
-                }
-mstore(0x9f80, mload(0x8680))
-
-        {
-            let scalar := mload(0x9f80)
-            let is_inf := and(
-                and(eq(mload(0x9f00), 0), eq(mload(0x9f20), 0)),
-                and(eq(mload(0x9f40), 0), eq(mload(0x9f60), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0x9f00, 0)
-                mstore(0x9f20, 0)
-                mstore(0x9f40, 0)
-                mstore(0x9f60, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0x9f00, 0xa0, 0x9f00, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0x9fa0, mload(0x9e00))
-mstore(0x9fc0, mload(0x9e20))
-mstore(0x9fe0, mload(0x9e40))
-mstore(0xa000, mload(0x9e60))
-                }
-{
-                    mstore(0xa020, mload(0x9f00))
-mstore(0xa040, mload(0x9f20))
-mstore(0xa060, mload(0x9f40))
-mstore(0xa080, mload(0x9f60))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0x9fa0), 0), eq(mload(0x9fc0), 0)),
-                and(eq(mload(0x9fe0), 0), eq(mload(0xa000), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xa020), 0), eq(mload(0xa040), 0)),
-                and(eq(mload(0xa060), 0), eq(mload(0xa080), 0))
-            )
-            if lhs_inf {
-                mstore(0x9fa0, mload(0xa020))
-                mstore(0x9fc0, mload(0xa040))
-                mstore(0x9fe0, mload(0xa060))
-                mstore(0xa000, mload(0xa080))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0x9fa0, 0x100, 0x9fa0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xa0a0, mload(0x5a0))
-mstore(0xa0c0, mload(0x5c0))
-mstore(0xa0e0, mload(0x5e0))
-mstore(0xa100, mload(0x600))
-                }
-mstore(0xa120, mload(0x86a0))
-
-        {
-            let scalar := mload(0xa120)
-            let is_inf := and(
-                and(eq(mload(0xa0a0), 0), eq(mload(0xa0c0), 0)),
-                and(eq(mload(0xa0e0), 0), eq(mload(0xa100), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xa0a0, 0)
-                mstore(0xa0c0, 0)
-                mstore(0xa0e0, 0)
-                mstore(0xa100, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xa0a0, 0xa0, 0xa0a0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xa140, mload(0x9fa0))
-mstore(0xa160, mload(0x9fc0))
-mstore(0xa180, mload(0x9fe0))
-mstore(0xa1a0, mload(0xa000))
-                }
-{
-                    mstore(0xa1c0, mload(0xa0a0))
-mstore(0xa1e0, mload(0xa0c0))
-mstore(0xa200, mload(0xa0e0))
-mstore(0xa220, mload(0xa100))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xa140), 0), eq(mload(0xa160), 0)),
-                and(eq(mload(0xa180), 0), eq(mload(0xa1a0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xa1c0), 0), eq(mload(0xa1e0), 0)),
-                and(eq(mload(0xa200), 0), eq(mload(0xa220), 0))
-            )
-            if lhs_inf {
-                mstore(0xa140, mload(0xa1c0))
-                mstore(0xa160, mload(0xa1e0))
-                mstore(0xa180, mload(0xa200))
-                mstore(0xa1a0, mload(0xa220))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xa140, 0x100, 0xa140, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xa240, mload(0x620))
-mstore(0xa260, mload(0x640))
-mstore(0xa280, mload(0x660))
-mstore(0xa2a0, mload(0x680))
-                }
-mstore(0xa2c0, mload(0x86c0))
-
-        {
-            let scalar := mload(0xa2c0)
-            let is_inf := and(
-                and(eq(mload(0xa240), 0), eq(mload(0xa260), 0)),
-                and(eq(mload(0xa280), 0), eq(mload(0xa2a0), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xa240, 0)
-                mstore(0xa260, 0)
-                mstore(0xa280, 0)
-                mstore(0xa2a0, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xa240, 0xa0, 0xa240, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xa2e0, mload(0xa140))
-mstore(0xa300, mload(0xa160))
-mstore(0xa320, mload(0xa180))
-mstore(0xa340, mload(0xa1a0))
-                }
-{
-                    mstore(0xa360, mload(0xa240))
-mstore(0xa380, mload(0xa260))
-mstore(0xa3a0, mload(0xa280))
-mstore(0xa3c0, mload(0xa2a0))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xa2e0), 0), eq(mload(0xa300), 0)),
-                and(eq(mload(0xa320), 0), eq(mload(0xa340), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xa360), 0), eq(mload(0xa380), 0)),
-                and(eq(mload(0xa3a0), 0), eq(mload(0xa3c0), 0))
-            )
-            if lhs_inf {
-                mstore(0xa2e0, mload(0xa360))
-                mstore(0xa300, mload(0xa380))
-                mstore(0xa320, mload(0xa3a0))
-                mstore(0xa340, mload(0xa3c0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xa2e0, 0x100, 0xa2e0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xa3e0, mload(0x220))
-mstore(0xa400, mload(0x240))
-mstore(0xa420, mload(0x260))
-mstore(0xa440, mload(0x280))
-                }
-mstore(0xa460, mload(0x86e0))
-
-        {
-            let scalar := mload(0xa460)
-            let is_inf := and(
-                and(eq(mload(0xa3e0), 0), eq(mload(0xa400), 0)),
-                and(eq(mload(0xa420), 0), eq(mload(0xa440), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xa3e0, 0)
-                mstore(0xa400, 0)
-                mstore(0xa420, 0)
-                mstore(0xa440, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xa3e0, 0xa0, 0xa3e0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xa480, mload(0xa2e0))
-mstore(0xa4a0, mload(0xa300))
-mstore(0xa4c0, mload(0xa320))
-mstore(0xa4e0, mload(0xa340))
-                }
-{
-                    mstore(0xa500, mload(0xa3e0))
-mstore(0xa520, mload(0xa400))
-mstore(0xa540, mload(0xa420))
-mstore(0xa560, mload(0xa440))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xa480), 0), eq(mload(0xa4a0), 0)),
-                and(eq(mload(0xa4c0), 0), eq(mload(0xa4e0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xa500), 0), eq(mload(0xa520), 0)),
-                and(eq(mload(0xa540), 0), eq(mload(0xa560), 0))
-            )
-            if lhs_inf {
-                mstore(0xa480, mload(0xa500))
-                mstore(0xa4a0, mload(0xa520))
-                mstore(0xa4c0, mload(0xa540))
-                mstore(0xa4e0, mload(0xa560))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xa480, 0x100, 0xa480, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xa580, mload(0x2a0))
-mstore(0xa5a0, mload(0x2c0))
-mstore(0xa5c0, mload(0x2e0))
-mstore(0xa5e0, mload(0x300))
-                }
-mstore(0xa600, mload(0x8700))
-
-        {
-            let scalar := mload(0xa600)
-            let is_inf := and(
-                and(eq(mload(0xa580), 0), eq(mload(0xa5a0), 0)),
-                and(eq(mload(0xa5c0), 0), eq(mload(0xa5e0), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xa580, 0)
-                mstore(0xa5a0, 0)
-                mstore(0xa5c0, 0)
-                mstore(0xa5e0, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xa580, 0xa0, 0xa580, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xa620, mload(0xa480))
-mstore(0xa640, mload(0xa4a0))
-mstore(0xa660, mload(0xa4c0))
-mstore(0xa680, mload(0xa4e0))
-                }
-{
-                    mstore(0xa6a0, mload(0xa580))
-mstore(0xa6c0, mload(0xa5a0))
-mstore(0xa6e0, mload(0xa5c0))
-mstore(0xa700, mload(0xa5e0))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xa620), 0), eq(mload(0xa640), 0)),
-                and(eq(mload(0xa660), 0), eq(mload(0xa680), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xa6a0), 0), eq(mload(0xa6c0), 0)),
-                and(eq(mload(0xa6e0), 0), eq(mload(0xa700), 0))
-            )
-            if lhs_inf {
-                mstore(0xa620, mload(0xa6a0))
-                mstore(0xa640, mload(0xa6c0))
-                mstore(0xa660, mload(0xa6e0))
-                mstore(0xa680, mload(0xa700))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xa620, 0x100, 0xa620, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xa720, mload(0x320))
-mstore(0xa740, mload(0x340))
-mstore(0xa760, mload(0x360))
-mstore(0xa780, mload(0x380))
-                }
-mstore(0xa7a0, mload(0x8720))
-
-        {
-            let scalar := mload(0xa7a0)
-            let is_inf := and(
-                and(eq(mload(0xa720), 0), eq(mload(0xa740), 0)),
-                and(eq(mload(0xa760), 0), eq(mload(0xa780), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xa720, 0)
-                mstore(0xa740, 0)
-                mstore(0xa760, 0)
-                mstore(0xa780, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xa720, 0xa0, 0xa720, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xa7c0, mload(0xa620))
-mstore(0xa7e0, mload(0xa640))
-mstore(0xa800, mload(0xa660))
-mstore(0xa820, mload(0xa680))
-                }
-{
-                    mstore(0xa840, mload(0xa720))
-mstore(0xa860, mload(0xa740))
-mstore(0xa880, mload(0xa760))
-mstore(0xa8a0, mload(0xa780))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xa7c0), 0), eq(mload(0xa7e0), 0)),
-                and(eq(mload(0xa800), 0), eq(mload(0xa820), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xa840), 0), eq(mload(0xa860), 0)),
-                and(eq(mload(0xa880), 0), eq(mload(0xa8a0), 0))
-            )
-            if lhs_inf {
-                mstore(0xa7c0, mload(0xa840))
-                mstore(0xa7e0, mload(0xa860))
-                mstore(0xa800, mload(0xa880))
-                mstore(0xa820, mload(0xa8a0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xa7c0, 0x100, 0xa7c0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xa8c0, mload(0x3a0))
-mstore(0xa8e0, mload(0x3c0))
-mstore(0xa900, mload(0x3e0))
-mstore(0xa920, mload(0x400))
-                }
-mstore(0xa940, mload(0x8740))
-
-        {
-            let scalar := mload(0xa940)
-            let is_inf := and(
-                and(eq(mload(0xa8c0), 0), eq(mload(0xa8e0), 0)),
-                and(eq(mload(0xa900), 0), eq(mload(0xa920), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xa8c0, 0)
-                mstore(0xa8e0, 0)
-                mstore(0xa900, 0)
-                mstore(0xa920, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xa8c0, 0xa0, 0xa8c0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xa960, mload(0xa7c0))
-mstore(0xa980, mload(0xa7e0))
-mstore(0xa9a0, mload(0xa800))
-mstore(0xa9c0, mload(0xa820))
-                }
-{
-                    mstore(0xa9e0, mload(0xa8c0))
-mstore(0xaa00, mload(0xa8e0))
-mstore(0xaa20, mload(0xa900))
-mstore(0xaa40, mload(0xa920))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xa960), 0), eq(mload(0xa980), 0)),
-                and(eq(mload(0xa9a0), 0), eq(mload(0xa9c0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xa9e0), 0), eq(mload(0xaa00), 0)),
-                and(eq(mload(0xaa20), 0), eq(mload(0xaa40), 0))
-            )
-            if lhs_inf {
-                mstore(0xa960, mload(0xa9e0))
-                mstore(0xa980, mload(0xaa00))
-                mstore(0xa9a0, mload(0xaa20))
-                mstore(0xa9c0, mload(0xaa40))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xa960, 0x100, 0xa960, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xaa60, mload(0x720))
-mstore(0xaa80, mload(0x740))
-mstore(0xaaa0, mload(0x760))
-mstore(0xaac0, mload(0x780))
-                }
-mstore(0xaae0, mload(0x8760))
-
-        {
-            let scalar := mload(0xaae0)
-            let is_inf := and(
-                and(eq(mload(0xaa60), 0), eq(mload(0xaa80), 0)),
-                and(eq(mload(0xaaa0), 0), eq(mload(0xaac0), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xaa60, 0)
-                mstore(0xaa80, 0)
-                mstore(0xaaa0, 0)
-                mstore(0xaac0, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xaa60, 0xa0, 0xaa60, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xab00, mload(0xa960))
-mstore(0xab20, mload(0xa980))
-mstore(0xab40, mload(0xa9a0))
-mstore(0xab60, mload(0xa9c0))
-                }
-{
-                    mstore(0xab80, mload(0xaa60))
-mstore(0xaba0, mload(0xaa80))
-mstore(0xabc0, mload(0xaaa0))
-mstore(0xabe0, mload(0xaac0))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xab00), 0), eq(mload(0xab20), 0)),
-                and(eq(mload(0xab40), 0), eq(mload(0xab60), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xab80), 0), eq(mload(0xaba0), 0)),
-                and(eq(mload(0xabc0), 0), eq(mload(0xabe0), 0))
-            )
-            if lhs_inf {
-                mstore(0xab00, mload(0xab80))
-                mstore(0xab20, mload(0xaba0))
-                mstore(0xab40, mload(0xabc0))
-                mstore(0xab60, mload(0xabe0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xab00, 0x100, 0xab00, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xac00, mload(0x7a0))
-mstore(0xac20, mload(0x7c0))
-mstore(0xac40, mload(0x7e0))
-mstore(0xac60, mload(0x800))
-                }
-mstore(0xac80, mload(0x8780))
-
-        {
-            let scalar := mload(0xac80)
-            let is_inf := and(
-                and(eq(mload(0xac00), 0), eq(mload(0xac20), 0)),
-                and(eq(mload(0xac40), 0), eq(mload(0xac60), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xac00, 0)
-                mstore(0xac20, 0)
-                mstore(0xac40, 0)
-                mstore(0xac60, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xac00, 0xa0, 0xac00, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xaca0, mload(0xab00))
-mstore(0xacc0, mload(0xab20))
-mstore(0xace0, mload(0xab40))
-mstore(0xad00, mload(0xab60))
-                }
-{
-                    mstore(0xad20, mload(0xac00))
-mstore(0xad40, mload(0xac20))
-mstore(0xad60, mload(0xac40))
-mstore(0xad80, mload(0xac60))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xaca0), 0), eq(mload(0xacc0), 0)),
-                and(eq(mload(0xace0), 0), eq(mload(0xad00), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xad20), 0), eq(mload(0xad40), 0)),
-                and(eq(mload(0xad60), 0), eq(mload(0xad80), 0))
-            )
-            if lhs_inf {
-                mstore(0xaca0, mload(0xad20))
-                mstore(0xacc0, mload(0xad40))
-                mstore(0xace0, mload(0xad60))
-                mstore(0xad00, mload(0xad80))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xaca0, 0x100, 0xaca0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xada0, mload(0x820))
-mstore(0xadc0, mload(0x840))
-mstore(0xade0, mload(0x860))
-mstore(0xae00, mload(0x880))
-                }
-mstore(0xae20, mload(0x87a0))
-
-        {
-            let scalar := mload(0xae20)
-            let is_inf := and(
-                and(eq(mload(0xada0), 0), eq(mload(0xadc0), 0)),
-                and(eq(mload(0xade0), 0), eq(mload(0xae00), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xada0, 0)
-                mstore(0xadc0, 0)
-                mstore(0xade0, 0)
-                mstore(0xae00, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xada0, 0xa0, 0xada0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xae40, mload(0xaca0))
-mstore(0xae60, mload(0xacc0))
-mstore(0xae80, mload(0xace0))
-mstore(0xaea0, mload(0xad00))
-                }
-{
-                    mstore(0xaec0, mload(0xada0))
-mstore(0xaee0, mload(0xadc0))
-mstore(0xaf00, mload(0xade0))
-mstore(0xaf20, mload(0xae00))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xae40), 0), eq(mload(0xae60), 0)),
-                and(eq(mload(0xae80), 0), eq(mload(0xaea0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xaec0), 0), eq(mload(0xaee0), 0)),
-                and(eq(mload(0xaf00), 0), eq(mload(0xaf20), 0))
-            )
-            if lhs_inf {
-                mstore(0xae40, mload(0xaec0))
-                mstore(0xae60, mload(0xaee0))
-                mstore(0xae80, mload(0xaf00))
-                mstore(0xaea0, mload(0xaf20))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xae40, 0x100, 0xae40, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xaf40, mload(0x8a0))
-mstore(0xaf60, mload(0x8c0))
-mstore(0xaf80, mload(0x8e0))
-mstore(0xafa0, mload(0x900))
-                }
-mstore(0xafc0, mload(0x87c0))
-
-        {
-            let scalar := mload(0xafc0)
-            let is_inf := and(
-                and(eq(mload(0xaf40), 0), eq(mload(0xaf60), 0)),
-                and(eq(mload(0xaf80), 0), eq(mload(0xafa0), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xaf40, 0)
-                mstore(0xaf60, 0)
-                mstore(0xaf80, 0)
-                mstore(0xafa0, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xaf40, 0xa0, 0xaf40, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xafe0, mload(0xae40))
-mstore(0xb000, mload(0xae60))
-mstore(0xb020, mload(0xae80))
-mstore(0xb040, mload(0xaea0))
-                }
-{
-                    mstore(0xb060, mload(0xaf40))
-mstore(0xb080, mload(0xaf60))
-mstore(0xb0a0, mload(0xaf80))
-mstore(0xb0c0, mload(0xafa0))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xafe0), 0), eq(mload(0xb000), 0)),
-                and(eq(mload(0xb020), 0), eq(mload(0xb040), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xb060), 0), eq(mload(0xb080), 0)),
-                and(eq(mload(0xb0a0), 0), eq(mload(0xb0c0), 0))
-            )
-            if lhs_inf {
-                mstore(0xafe0, mload(0xb060))
-                mstore(0xb000, mload(0xb080))
-                mstore(0xb020, mload(0xb0a0))
-                mstore(0xb040, mload(0xb0c0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xafe0, 0x100, 0xafe0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xb0e0, mload(0x920))
-mstore(0xb100, mload(0x940))
-mstore(0xb120, mload(0x960))
-mstore(0xb140, mload(0x980))
-                }
-mstore(0xb160, mload(0x87e0))
-
-        {
-            let scalar := mload(0xb160)
-            let is_inf := and(
-                and(eq(mload(0xb0e0), 0), eq(mload(0xb100), 0)),
-                and(eq(mload(0xb120), 0), eq(mload(0xb140), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xb0e0, 0)
-                mstore(0xb100, 0)
-                mstore(0xb120, 0)
-                mstore(0xb140, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xb0e0, 0xa0, 0xb0e0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xb180, mload(0xafe0))
-mstore(0xb1a0, mload(0xb000))
-mstore(0xb1c0, mload(0xb020))
-mstore(0xb1e0, mload(0xb040))
-                }
-{
-                    mstore(0xb200, mload(0xb0e0))
-mstore(0xb220, mload(0xb100))
-mstore(0xb240, mload(0xb120))
-mstore(0xb260, mload(0xb140))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xb180), 0), eq(mload(0xb1a0), 0)),
-                and(eq(mload(0xb1c0), 0), eq(mload(0xb1e0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xb200), 0), eq(mload(0xb220), 0)),
-                and(eq(mload(0xb240), 0), eq(mload(0xb260), 0))
-            )
-            if lhs_inf {
-                mstore(0xb180, mload(0xb200))
-                mstore(0xb1a0, mload(0xb220))
-                mstore(0xb1c0, mload(0xb240))
-                mstore(0xb1e0, mload(0xb260))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xb180, 0x100, 0xb180, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xb280, mload(0x9a0))
-mstore(0xb2a0, mload(0x9c0))
-mstore(0xb2c0, mload(0x9e0))
-mstore(0xb2e0, mload(0xa00))
-                }
-mstore(0xb300, mload(0x8800))
-
-        {
-            let scalar := mload(0xb300)
-            let is_inf := and(
-                and(eq(mload(0xb280), 0), eq(mload(0xb2a0), 0)),
-                and(eq(mload(0xb2c0), 0), eq(mload(0xb2e0), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xb280, 0)
-                mstore(0xb2a0, 0)
-                mstore(0xb2c0, 0)
-                mstore(0xb2e0, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xb280, 0xa0, 0xb280, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xb320, mload(0xb180))
-mstore(0xb340, mload(0xb1a0))
-mstore(0xb360, mload(0xb1c0))
-mstore(0xb380, mload(0xb1e0))
-                }
-{
-                    mstore(0xb3a0, mload(0xb280))
-mstore(0xb3c0, mload(0xb2a0))
-mstore(0xb3e0, mload(0xb2c0))
-mstore(0xb400, mload(0xb2e0))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xb320), 0), eq(mload(0xb340), 0)),
-                and(eq(mload(0xb360), 0), eq(mload(0xb380), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xb3a0), 0), eq(mload(0xb3c0), 0)),
-                and(eq(mload(0xb3e0), 0), eq(mload(0xb400), 0))
-            )
-            if lhs_inf {
-                mstore(0xb320, mload(0xb3a0))
-                mstore(0xb340, mload(0xb3c0))
-                mstore(0xb360, mload(0xb3e0))
-                mstore(0xb380, mload(0xb400))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xb320, 0x100, 0xb320, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xb420, mload(0xa20))
-mstore(0xb440, mload(0xa40))
-mstore(0xb460, mload(0xa60))
-mstore(0xb480, mload(0xa80))
-                }
-mstore(0xb4a0, mload(0x8820))
-
-        {
-            let scalar := mload(0xb4a0)
-            let is_inf := and(
-                and(eq(mload(0xb420), 0), eq(mload(0xb440), 0)),
-                and(eq(mload(0xb460), 0), eq(mload(0xb480), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xb420, 0)
-                mstore(0xb440, 0)
-                mstore(0xb460, 0)
-                mstore(0xb480, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xb420, 0xa0, 0xb420, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xb4c0, mload(0xb320))
-mstore(0xb4e0, mload(0xb340))
-mstore(0xb500, mload(0xb360))
-mstore(0xb520, mload(0xb380))
-                }
-{
-                    mstore(0xb540, mload(0xb420))
-mstore(0xb560, mload(0xb440))
-mstore(0xb580, mload(0xb460))
-mstore(0xb5a0, mload(0xb480))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xb4c0), 0), eq(mload(0xb4e0), 0)),
-                and(eq(mload(0xb500), 0), eq(mload(0xb520), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xb540), 0), eq(mload(0xb560), 0)),
-                and(eq(mload(0xb580), 0), eq(mload(0xb5a0), 0))
-            )
-            if lhs_inf {
-                mstore(0xb4c0, mload(0xb540))
-                mstore(0xb4e0, mload(0xb560))
-                mstore(0xb500, mload(0xb580))
-                mstore(0xb520, mload(0xb5a0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xb4c0, 0x100, 0xb4c0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xb5c0, mload(0xaa0))
-mstore(0xb5e0, mload(0xac0))
-mstore(0xb600, mload(0xae0))
-mstore(0xb620, mload(0xb00))
-                }
-mstore(0xb640, mload(0x8840))
-
-        {
-            let scalar := mload(0xb640)
-            let is_inf := and(
-                and(eq(mload(0xb5c0), 0), eq(mload(0xb5e0), 0)),
-                and(eq(mload(0xb600), 0), eq(mload(0xb620), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xb5c0, 0)
-                mstore(0xb5e0, 0)
-                mstore(0xb600, 0)
-                mstore(0xb620, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xb5c0, 0xa0, 0xb5c0, 0x80), 1),
-                    success
-                )
-            }
-        }
 {
-                    mstore(0xb660, mload(0xb4c0))
-mstore(0xb680, mload(0xb4e0))
-mstore(0xb6a0, mload(0xb500))
-mstore(0xb6c0, mload(0xb520))
-                }
-{
-                    mstore(0xb6e0, mload(0xb5c0))
-mstore(0xb700, mload(0xb5e0))
-mstore(0xb720, mload(0xb600))
-mstore(0xb740, mload(0xb620))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xb660), 0), eq(mload(0xb680), 0)),
-                and(eq(mload(0xb6a0), 0), eq(mload(0xb6c0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xb6e0), 0), eq(mload(0xb700), 0)),
-                and(eq(mload(0xb720), 0), eq(mload(0xb740), 0))
-            )
-            if lhs_inf {
-                mstore(0xb660, mload(0xb6e0))
-                mstore(0xb680, mload(0xb700))
-                mstore(0xb6a0, mload(0xb720))
-                mstore(0xb6c0, mload(0xb740))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xb660, 0x100, 0xb660, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xb760, mload(0xb20))
-mstore(0xb780, mload(0xb40))
-mstore(0xb7a0, mload(0xb60))
-mstore(0xb7c0, mload(0xb80))
-                }
-mstore(0xb7e0, mload(0x8860))
-
-        {
-            let scalar := mload(0xb7e0)
-            let is_inf := and(
-                and(eq(mload(0xb760), 0), eq(mload(0xb780), 0)),
-                and(eq(mload(0xb7a0), 0), eq(mload(0xb7c0), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xb760, 0)
-                mstore(0xb780, 0)
-                mstore(0xb7a0, 0)
-                mstore(0xb7c0, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xb760, 0xa0, 0xb760, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xb800, mload(0xb660))
-mstore(0xb820, mload(0xb680))
-mstore(0xb840, mload(0xb6a0))
-mstore(0xb860, mload(0xb6c0))
-                }
-{
-                    mstore(0xb880, mload(0xb760))
-mstore(0xb8a0, mload(0xb780))
-mstore(0xb8c0, mload(0xb7a0))
-mstore(0xb8e0, mload(0xb7c0))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xb800), 0), eq(mload(0xb820), 0)),
-                and(eq(mload(0xb840), 0), eq(mload(0xb860), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xb880), 0), eq(mload(0xb8a0), 0)),
-                and(eq(mload(0xb8c0), 0), eq(mload(0xb8e0), 0))
-            )
-            if lhs_inf {
-                mstore(0xb800, mload(0xb880))
-                mstore(0xb820, mload(0xb8a0))
-                mstore(0xb840, mload(0xb8c0))
-                mstore(0xb860, mload(0xb8e0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xb800, 0x100, 0xb800, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xb900, mload(0xba0))
-mstore(0xb920, mload(0xbc0))
-mstore(0xb940, mload(0xbe0))
-mstore(0xb960, mload(0xc00))
-                }
-mstore(0xb980, mload(0x8880))
-
-        {
-            let scalar := mload(0xb980)
-            let is_inf := and(
-                and(eq(mload(0xb900), 0), eq(mload(0xb920), 0)),
-                and(eq(mload(0xb940), 0), eq(mload(0xb960), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xb900, 0)
-                mstore(0xb920, 0)
-                mstore(0xb940, 0)
-                mstore(0xb960, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xb900, 0xa0, 0xb900, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xb9a0, mload(0xb800))
-mstore(0xb9c0, mload(0xb820))
-mstore(0xb9e0, mload(0xb840))
-mstore(0xba00, mload(0xb860))
-                }
-{
-                    mstore(0xba20, mload(0xb900))
-mstore(0xba40, mload(0xb920))
-mstore(0xba60, mload(0xb940))
-mstore(0xba80, mload(0xb960))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xb9a0), 0), eq(mload(0xb9c0), 0)),
-                and(eq(mload(0xb9e0), 0), eq(mload(0xba00), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xba20), 0), eq(mload(0xba40), 0)),
-                and(eq(mload(0xba60), 0), eq(mload(0xba80), 0))
-            )
-            if lhs_inf {
-                mstore(0xb9a0, mload(0xba20))
-                mstore(0xb9c0, mload(0xba40))
-                mstore(0xb9e0, mload(0xba60))
-                mstore(0xba00, mload(0xba80))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xb9a0, 0x100, 0xb9a0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xbaa0, mload(0xc20))
-mstore(0xbac0, mload(0xc40))
-mstore(0xbae0, mload(0xc60))
-mstore(0xbb00, mload(0xc80))
-                }
-mstore(0xbb20, mload(0x88a0))
-
-        {
-            let scalar := mload(0xbb20)
-            let is_inf := and(
-                and(eq(mload(0xbaa0), 0), eq(mload(0xbac0), 0)),
-                and(eq(mload(0xbae0), 0), eq(mload(0xbb00), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xbaa0, 0)
-                mstore(0xbac0, 0)
-                mstore(0xbae0, 0)
-                mstore(0xbb00, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xbaa0, 0xa0, 0xbaa0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xbb40, mload(0xb9a0))
-mstore(0xbb60, mload(0xb9c0))
-mstore(0xbb80, mload(0xb9e0))
-mstore(0xbba0, mload(0xba00))
-                }
-{
-                    mstore(0xbbc0, mload(0xbaa0))
-mstore(0xbbe0, mload(0xbac0))
-mstore(0xbc00, mload(0xbae0))
-mstore(0xbc20, mload(0xbb00))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xbb40), 0), eq(mload(0xbb60), 0)),
-                and(eq(mload(0xbb80), 0), eq(mload(0xbba0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xbbc0), 0), eq(mload(0xbbe0), 0)),
-                and(eq(mload(0xbc00), 0), eq(mload(0xbc20), 0))
-            )
-            if lhs_inf {
-                mstore(0xbb40, mload(0xbbc0))
-                mstore(0xbb60, mload(0xbbe0))
-                mstore(0xbb80, mload(0xbc00))
-                mstore(0xbba0, mload(0xbc20))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xbb40, 0x100, 0xbb40, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xbc40, mload(0xca0))
-mstore(0xbc60, mload(0xcc0))
-mstore(0xbc80, mload(0xce0))
-mstore(0xbca0, mload(0xd00))
-                }
-mstore(0xbcc0, mload(0x88c0))
-
-        {
-            let scalar := mload(0xbcc0)
-            let is_inf := and(
-                and(eq(mload(0xbc40), 0), eq(mload(0xbc60), 0)),
-                and(eq(mload(0xbc80), 0), eq(mload(0xbca0), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xbc40, 0)
-                mstore(0xbc60, 0)
-                mstore(0xbc80, 0)
-                mstore(0xbca0, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xbc40, 0xa0, 0xbc40, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xbce0, mload(0xbb40))
-mstore(0xbd00, mload(0xbb60))
-mstore(0xbd20, mload(0xbb80))
-mstore(0xbd40, mload(0xbba0))
-                }
-{
-                    mstore(0xbd60, mload(0xbc40))
-mstore(0xbd80, mload(0xbc60))
-mstore(0xbda0, mload(0xbc80))
-mstore(0xbdc0, mload(0xbca0))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xbce0), 0), eq(mload(0xbd00), 0)),
-                and(eq(mload(0xbd20), 0), eq(mload(0xbd40), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xbd60), 0), eq(mload(0xbd80), 0)),
-                and(eq(mload(0xbda0), 0), eq(mload(0xbdc0), 0))
-            )
-            if lhs_inf {
-                mstore(0xbce0, mload(0xbd60))
-                mstore(0xbd00, mload(0xbd80))
-                mstore(0xbd20, mload(0xbda0))
-                mstore(0xbd40, mload(0xbdc0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xbce0, 0x100, 0xbce0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xbde0, mload(0xd20))
-mstore(0xbe00, mload(0xd40))
-mstore(0xbe20, mload(0xd60))
-mstore(0xbe40, mload(0xd80))
-                }
-mstore(0xbe60, mload(0x88e0))
-
-        {
-            let scalar := mload(0xbe60)
-            let is_inf := and(
-                and(eq(mload(0xbde0), 0), eq(mload(0xbe00), 0)),
-                and(eq(mload(0xbe20), 0), eq(mload(0xbe40), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xbde0, 0)
-                mstore(0xbe00, 0)
-                mstore(0xbe20, 0)
-                mstore(0xbe40, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xbde0, 0xa0, 0xbde0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xbe80, mload(0xbce0))
-mstore(0xbea0, mload(0xbd00))
-mstore(0xbec0, mload(0xbd20))
-mstore(0xbee0, mload(0xbd40))
-                }
-{
-                    mstore(0xbf00, mload(0xbde0))
-mstore(0xbf20, mload(0xbe00))
-mstore(0xbf40, mload(0xbe20))
-mstore(0xbf60, mload(0xbe40))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xbe80), 0), eq(mload(0xbea0), 0)),
-                and(eq(mload(0xbec0), 0), eq(mload(0xbee0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xbf00), 0), eq(mload(0xbf20), 0)),
-                and(eq(mload(0xbf40), 0), eq(mload(0xbf60), 0))
-            )
-            if lhs_inf {
-                mstore(0xbe80, mload(0xbf00))
-                mstore(0xbea0, mload(0xbf20))
-                mstore(0xbec0, mload(0xbf40))
-                mstore(0xbee0, mload(0xbf60))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xbe80, 0x100, 0xbe80, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xbf80, mload(0xda0))
-mstore(0xbfa0, mload(0xdc0))
-mstore(0xbfc0, mload(0xde0))
-mstore(0xbfe0, mload(0xe00))
-                }
-mstore(0xc000, mload(0x8900))
-
-        {
-            let scalar := mload(0xc000)
-            let is_inf := and(
-                and(eq(mload(0xbf80), 0), eq(mload(0xbfa0), 0)),
-                and(eq(mload(0xbfc0), 0), eq(mload(0xbfe0), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xbf80, 0)
-                mstore(0xbfa0, 0)
-                mstore(0xbfc0, 0)
-                mstore(0xbfe0, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xbf80, 0xa0, 0xbf80, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xc020, mload(0xbe80))
-mstore(0xc040, mload(0xbea0))
-mstore(0xc060, mload(0xbec0))
-mstore(0xc080, mload(0xbee0))
-                }
-{
-                    mstore(0xc0a0, mload(0xbf80))
-mstore(0xc0c0, mload(0xbfa0))
-mstore(0xc0e0, mload(0xbfc0))
-mstore(0xc100, mload(0xbfe0))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xc020), 0), eq(mload(0xc040), 0)),
-                and(eq(mload(0xc060), 0), eq(mload(0xc080), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xc0a0), 0), eq(mload(0xc0c0), 0)),
-                and(eq(mload(0xc0e0), 0), eq(mload(0xc100), 0))
-            )
-            if lhs_inf {
-                mstore(0xc020, mload(0xc0a0))
-                mstore(0xc040, mload(0xc0c0))
-                mstore(0xc060, mload(0xc0e0))
-                mstore(0xc080, mload(0xc100))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xc020, 0x100, 0xc020, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xc120, mload(0xe20))
-mstore(0xc140, mload(0xe40))
-mstore(0xc160, mload(0xe60))
-mstore(0xc180, mload(0xe80))
-                }
-mstore(0xc1a0, mload(0x8920))
-
-        {
-            let scalar := mload(0xc1a0)
-            let is_inf := and(
-                and(eq(mload(0xc120), 0), eq(mload(0xc140), 0)),
-                and(eq(mload(0xc160), 0), eq(mload(0xc180), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xc120, 0)
-                mstore(0xc140, 0)
-                mstore(0xc160, 0)
-                mstore(0xc180, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xc120, 0xa0, 0xc120, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xc1c0, mload(0xc020))
-mstore(0xc1e0, mload(0xc040))
-mstore(0xc200, mload(0xc060))
-mstore(0xc220, mload(0xc080))
-                }
-{
-                    mstore(0xc240, mload(0xc120))
-mstore(0xc260, mload(0xc140))
-mstore(0xc280, mload(0xc160))
-mstore(0xc2a0, mload(0xc180))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xc1c0), 0), eq(mload(0xc1e0), 0)),
-                and(eq(mload(0xc200), 0), eq(mload(0xc220), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xc240), 0), eq(mload(0xc260), 0)),
-                and(eq(mload(0xc280), 0), eq(mload(0xc2a0), 0))
-            )
-            if lhs_inf {
-                mstore(0xc1c0, mload(0xc240))
-                mstore(0xc1e0, mload(0xc260))
-                mstore(0xc200, mload(0xc280))
-                mstore(0xc220, mload(0xc2a0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xc1c0, 0x100, 0xc1c0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xc2c0, mload(0xea0))
-mstore(0xc2e0, mload(0xec0))
-mstore(0xc300, mload(0xee0))
-mstore(0xc320, mload(0xf00))
-                }
-mstore(0xc340, mload(0x8940))
-
-        {
-            let scalar := mload(0xc340)
-            let is_inf := and(
-                and(eq(mload(0xc2c0), 0), eq(mload(0xc2e0), 0)),
-                and(eq(mload(0xc300), 0), eq(mload(0xc320), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xc2c0, 0)
-                mstore(0xc2e0, 0)
-                mstore(0xc300, 0)
-                mstore(0xc320, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xc2c0, 0xa0, 0xc2c0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xc360, mload(0xc1c0))
-mstore(0xc380, mload(0xc1e0))
-mstore(0xc3a0, mload(0xc200))
-mstore(0xc3c0, mload(0xc220))
-                }
-{
-                    mstore(0xc3e0, mload(0xc2c0))
-mstore(0xc400, mload(0xc2e0))
-mstore(0xc420, mload(0xc300))
-mstore(0xc440, mload(0xc320))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xc360), 0), eq(mload(0xc380), 0)),
-                and(eq(mload(0xc3a0), 0), eq(mload(0xc3c0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xc3e0), 0), eq(mload(0xc400), 0)),
-                and(eq(mload(0xc420), 0), eq(mload(0xc440), 0))
-            )
-            if lhs_inf {
-                mstore(0xc360, mload(0xc3e0))
-                mstore(0xc380, mload(0xc400))
-                mstore(0xc3a0, mload(0xc420))
-                mstore(0xc3c0, mload(0xc440))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xc360, 0x100, 0xc360, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xc460, mload(0xf20))
-mstore(0xc480, mload(0xf40))
-mstore(0xc4a0, mload(0xf60))
-mstore(0xc4c0, mload(0xf80))
-                }
-mstore(0xc4e0, mload(0x8960))
-
-        {
-            let scalar := mload(0xc4e0)
-            let is_inf := and(
-                and(eq(mload(0xc460), 0), eq(mload(0xc480), 0)),
-                and(eq(mload(0xc4a0), 0), eq(mload(0xc4c0), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xc460, 0)
-                mstore(0xc480, 0)
-                mstore(0xc4a0, 0)
-                mstore(0xc4c0, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xc460, 0xa0, 0xc460, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xc500, mload(0xc360))
-mstore(0xc520, mload(0xc380))
-mstore(0xc540, mload(0xc3a0))
-mstore(0xc560, mload(0xc3c0))
-                }
-{
-                    mstore(0xc580, mload(0xc460))
-mstore(0xc5a0, mload(0xc480))
-mstore(0xc5c0, mload(0xc4a0))
-mstore(0xc5e0, mload(0xc4c0))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xc500), 0), eq(mload(0xc520), 0)),
-                and(eq(mload(0xc540), 0), eq(mload(0xc560), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xc580), 0), eq(mload(0xc5a0), 0)),
-                and(eq(mload(0xc5c0), 0), eq(mload(0xc5e0), 0))
-            )
-            if lhs_inf {
-                mstore(0xc500, mload(0xc580))
-                mstore(0xc520, mload(0xc5a0))
-                mstore(0xc540, mload(0xc5c0))
-                mstore(0xc560, mload(0xc5e0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xc500, 0x100, 0xc500, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xc600, mload(0x1b20))
-mstore(0xc620, mload(0x1b40))
-mstore(0xc640, mload(0x1b60))
-mstore(0xc660, mload(0x1b80))
-                }
-mstore(0xc680, mload(0x8980))
-
-        {
-            let scalar := mload(0xc680)
-            let is_inf := and(
-                and(eq(mload(0xc600), 0), eq(mload(0xc620), 0)),
-                and(eq(mload(0xc640), 0), eq(mload(0xc660), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xc600, 0)
-                mstore(0xc620, 0)
-                mstore(0xc640, 0)
-                mstore(0xc660, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xc600, 0xa0, 0xc600, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xc6a0, mload(0xc500))
-mstore(0xc6c0, mload(0xc520))
-mstore(0xc6e0, mload(0xc540))
-mstore(0xc700, mload(0xc560))
-                }
-{
-                    mstore(0xc720, mload(0xc600))
-mstore(0xc740, mload(0xc620))
-mstore(0xc760, mload(0xc640))
-mstore(0xc780, mload(0xc660))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xc6a0), 0), eq(mload(0xc6c0), 0)),
-                and(eq(mload(0xc6e0), 0), eq(mload(0xc700), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xc720), 0), eq(mload(0xc740), 0)),
-                and(eq(mload(0xc760), 0), eq(mload(0xc780), 0))
-            )
-            if lhs_inf {
-                mstore(0xc6a0, mload(0xc720))
-                mstore(0xc6c0, mload(0xc740))
-                mstore(0xc6e0, mload(0xc760))
-                mstore(0xc700, mload(0xc780))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xc6a0, 0x100, 0xc6a0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xc7a0, mload(0x1ba0))
-mstore(0xc7c0, mload(0x1bc0))
-mstore(0xc7e0, mload(0x1be0))
-mstore(0xc800, mload(0x1c00))
-                }
-mstore(0xc820, mload(0x89a0))
-
-        {
-            let scalar := mload(0xc820)
-            let is_inf := and(
-                and(eq(mload(0xc7a0), 0), eq(mload(0xc7c0), 0)),
-                and(eq(mload(0xc7e0), 0), eq(mload(0xc800), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xc7a0, 0)
-                mstore(0xc7c0, 0)
-                mstore(0xc7e0, 0)
-                mstore(0xc800, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xc7a0, 0xa0, 0xc7a0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xc840, mload(0xc6a0))
-mstore(0xc860, mload(0xc6c0))
-mstore(0xc880, mload(0xc6e0))
-mstore(0xc8a0, mload(0xc700))
-                }
-{
-                    mstore(0xc8c0, mload(0xc7a0))
-mstore(0xc8e0, mload(0xc7c0))
-mstore(0xc900, mload(0xc7e0))
-mstore(0xc920, mload(0xc800))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xc840), 0), eq(mload(0xc860), 0)),
-                and(eq(mload(0xc880), 0), eq(mload(0xc8a0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xc8c0), 0), eq(mload(0xc8e0), 0)),
-                and(eq(mload(0xc900), 0), eq(mload(0xc920), 0))
-            )
-            if lhs_inf {
-                mstore(0xc840, mload(0xc8c0))
-                mstore(0xc860, mload(0xc8e0))
-                mstore(0xc880, mload(0xc900))
-                mstore(0xc8a0, mload(0xc920))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xc840, 0x100, 0xc840, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xc940, mload(0x1c20))
-mstore(0xc960, mload(0x1c40))
-mstore(0xc980, mload(0x1c60))
-mstore(0xc9a0, mload(0x1c80))
-                }
-mstore(0xc9c0, mload(0x89c0))
-
-        {
-            let scalar := mload(0xc9c0)
-            let is_inf := and(
-                and(eq(mload(0xc940), 0), eq(mload(0xc960), 0)),
-                and(eq(mload(0xc980), 0), eq(mload(0xc9a0), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xc940, 0)
-                mstore(0xc960, 0)
-                mstore(0xc980, 0)
-                mstore(0xc9a0, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xc940, 0xa0, 0xc940, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xc9e0, mload(0xc840))
-mstore(0xca00, mload(0xc860))
-mstore(0xca20, mload(0xc880))
-mstore(0xca40, mload(0xc8a0))
-                }
-{
-                    mstore(0xca60, mload(0xc940))
-mstore(0xca80, mload(0xc960))
-mstore(0xcaa0, mload(0xc980))
-mstore(0xcac0, mload(0xc9a0))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xc9e0), 0), eq(mload(0xca00), 0)),
-                and(eq(mload(0xca20), 0), eq(mload(0xca40), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xca60), 0), eq(mload(0xca80), 0)),
-                and(eq(mload(0xcaa0), 0), eq(mload(0xcac0), 0))
-            )
-            if lhs_inf {
-                mstore(0xc9e0, mload(0xca60))
-                mstore(0xca00, mload(0xca80))
-                mstore(0xca20, mload(0xcaa0))
-                mstore(0xca40, mload(0xcac0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xc9e0, 0x100, 0xc9e0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xcae0, mload(0x1ca0))
-mstore(0xcb00, mload(0x1cc0))
-mstore(0xcb20, mload(0x1ce0))
-mstore(0xcb40, mload(0x1d00))
-                }
-mstore(0xcb60, mload(0x89e0))
-
-        {
-            let scalar := mload(0xcb60)
-            let is_inf := and(
-                and(eq(mload(0xcae0), 0), eq(mload(0xcb00), 0)),
-                and(eq(mload(0xcb20), 0), eq(mload(0xcb40), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xcae0, 0)
-                mstore(0xcb00, 0)
-                mstore(0xcb20, 0)
-                mstore(0xcb40, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xcae0, 0xa0, 0xcae0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xcb80, mload(0xc9e0))
-mstore(0xcba0, mload(0xca00))
-mstore(0xcbc0, mload(0xca20))
-mstore(0xcbe0, mload(0xca40))
-                }
-{
-                    mstore(0xcc00, mload(0xcae0))
-mstore(0xcc20, mload(0xcb00))
-mstore(0xcc40, mload(0xcb20))
-mstore(0xcc60, mload(0xcb40))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xcb80), 0), eq(mload(0xcba0), 0)),
-                and(eq(mload(0xcbc0), 0), eq(mload(0xcbe0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xcc00), 0), eq(mload(0xcc20), 0)),
-                and(eq(mload(0xcc40), 0), eq(mload(0xcc60), 0))
-            )
-            if lhs_inf {
-                mstore(0xcb80, mload(0xcc00))
-                mstore(0xcba0, mload(0xcc20))
-                mstore(0xcbc0, mload(0xcc40))
-                mstore(0xcbe0, mload(0xcc60))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xcb80, 0x100, 0xcb80, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xcc80, mload(0x1a40))
-mstore(0xcca0, mload(0x1a60))
-mstore(0xccc0, mload(0x1a80))
-mstore(0xcce0, mload(0x1aa0))
-                }
-mstore(0xcd00, mload(0x8a00))
-
-        {
-            let scalar := mload(0xcd00)
-            let is_inf := and(
-                and(eq(mload(0xcc80), 0), eq(mload(0xcca0), 0)),
-                and(eq(mload(0xccc0), 0), eq(mload(0xcce0), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xcc80, 0)
-                mstore(0xcca0, 0)
-                mstore(0xccc0, 0)
-                mstore(0xcce0, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xcc80, 0xa0, 0xcc80, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xcd20, mload(0xcb80))
-mstore(0xcd40, mload(0xcba0))
-mstore(0xcd60, mload(0xcbc0))
-mstore(0xcd80, mload(0xcbe0))
-                }
-{
-                    mstore(0xcda0, mload(0xcc80))
-mstore(0xcdc0, mload(0xcca0))
-mstore(0xcde0, mload(0xccc0))
-mstore(0xce00, mload(0xcce0))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xcd20), 0), eq(mload(0xcd40), 0)),
-                and(eq(mload(0xcd60), 0), eq(mload(0xcd80), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xcda0), 0), eq(mload(0xcdc0), 0)),
-                and(eq(mload(0xcde0), 0), eq(mload(0xce00), 0))
-            )
-            if lhs_inf {
-                mstore(0xcd20, mload(0xcda0))
-                mstore(0xcd40, mload(0xcdc0))
-                mstore(0xcd60, mload(0xcde0))
-                mstore(0xcd80, mload(0xce00))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xcd20, 0x100, 0xcd20, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xce20, mload(0x1140))
-mstore(0xce40, mload(0x1160))
-mstore(0xce60, mload(0x1180))
-mstore(0xce80, mload(0x11a0))
-                }
-mstore(0xcea0, mload(0x8a20))
-
-        {
-            let scalar := mload(0xcea0)
-            let is_inf := and(
-                and(eq(mload(0xce20), 0), eq(mload(0xce40), 0)),
-                and(eq(mload(0xce60), 0), eq(mload(0xce80), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xce20, 0)
-                mstore(0xce40, 0)
-                mstore(0xce60, 0)
-                mstore(0xce80, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xce20, 0xa0, 0xce20, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xcec0, mload(0xcd20))
-mstore(0xcee0, mload(0xcd40))
-mstore(0xcf00, mload(0xcd60))
-mstore(0xcf20, mload(0xcd80))
-                }
-{
-                    mstore(0xcf40, mload(0xce20))
-mstore(0xcf60, mload(0xce40))
-mstore(0xcf80, mload(0xce60))
-mstore(0xcfa0, mload(0xce80))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xcec0), 0), eq(mload(0xcee0), 0)),
-                and(eq(mload(0xcf00), 0), eq(mload(0xcf20), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xcf40), 0), eq(mload(0xcf60), 0)),
-                and(eq(mload(0xcf80), 0), eq(mload(0xcfa0), 0))
-            )
-            if lhs_inf {
-                mstore(0xcec0, mload(0xcf40))
-                mstore(0xcee0, mload(0xcf60))
-                mstore(0xcf00, mload(0xcf80))
-                mstore(0xcf20, mload(0xcfa0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xcec0, 0x100, 0xcec0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xcfc0, mload(0x11c0))
-mstore(0xcfe0, mload(0x11e0))
-mstore(0xd000, mload(0x1200))
-mstore(0xd020, mload(0x1220))
-                }
-mstore(0xd040, mload(0x8a40))
-
-        {
-            let scalar := mload(0xd040)
-            let is_inf := and(
-                and(eq(mload(0xcfc0), 0), eq(mload(0xcfe0), 0)),
-                and(eq(mload(0xd000), 0), eq(mload(0xd020), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xcfc0, 0)
-                mstore(0xcfe0, 0)
-                mstore(0xd000, 0)
-                mstore(0xd020, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xcfc0, 0xa0, 0xcfc0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xd060, mload(0xcec0))
-mstore(0xd080, mload(0xcee0))
-mstore(0xd0a0, mload(0xcf00))
-mstore(0xd0c0, mload(0xcf20))
-                }
-{
-                    mstore(0xd0e0, mload(0xcfc0))
-mstore(0xd100, mload(0xcfe0))
-mstore(0xd120, mload(0xd000))
-mstore(0xd140, mload(0xd020))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xd060), 0), eq(mload(0xd080), 0)),
-                and(eq(mload(0xd0a0), 0), eq(mload(0xd0c0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xd0e0), 0), eq(mload(0xd100), 0)),
-                and(eq(mload(0xd120), 0), eq(mload(0xd140), 0))
-            )
-            if lhs_inf {
-                mstore(0xd060, mload(0xd0e0))
-                mstore(0xd080, mload(0xd100))
-                mstore(0xd0a0, mload(0xd120))
-                mstore(0xd0c0, mload(0xd140))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xd060, 0x100, 0xd060, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xd160, mload(0x1240))
-mstore(0xd180, mload(0x1260))
-mstore(0xd1a0, mload(0x1280))
-mstore(0xd1c0, mload(0x12a0))
-                }
-mstore(0xd1e0, mload(0x8a60))
-
-        {
-            let scalar := mload(0xd1e0)
-            let is_inf := and(
-                and(eq(mload(0xd160), 0), eq(mload(0xd180), 0)),
-                and(eq(mload(0xd1a0), 0), eq(mload(0xd1c0), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xd160, 0)
-                mstore(0xd180, 0)
-                mstore(0xd1a0, 0)
-                mstore(0xd1c0, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xd160, 0xa0, 0xd160, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xd200, mload(0xd060))
-mstore(0xd220, mload(0xd080))
-mstore(0xd240, mload(0xd0a0))
-mstore(0xd260, mload(0xd0c0))
-                }
-{
-                    mstore(0xd280, mload(0xd160))
-mstore(0xd2a0, mload(0xd180))
-mstore(0xd2c0, mload(0xd1a0))
-mstore(0xd2e0, mload(0xd1c0))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xd200), 0), eq(mload(0xd220), 0)),
-                and(eq(mload(0xd240), 0), eq(mload(0xd260), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xd280), 0), eq(mload(0xd2a0), 0)),
-                and(eq(mload(0xd2c0), 0), eq(mload(0xd2e0), 0))
-            )
-            if lhs_inf {
-                mstore(0xd200, mload(0xd280))
-                mstore(0xd220, mload(0xd2a0))
-                mstore(0xd240, mload(0xd2c0))
-                mstore(0xd260, mload(0xd2e0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xd200, 0x100, 0xd200, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xd300, mload(0x1860))
-mstore(0xd320, mload(0x1880))
-mstore(0xd340, mload(0x18a0))
-mstore(0xd360, mload(0x18c0))
-                }
-mstore(0xd380, mload(0x8a80))
-
-        {
-            let scalar := mload(0xd380)
-            let is_inf := and(
-                and(eq(mload(0xd300), 0), eq(mload(0xd320), 0)),
-                and(eq(mload(0xd340), 0), eq(mload(0xd360), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xd300, 0)
-                mstore(0xd320, 0)
-                mstore(0xd340, 0)
-                mstore(0xd360, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xd300, 0xa0, 0xd300, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xd3a0, mload(0xd200))
-mstore(0xd3c0, mload(0xd220))
-mstore(0xd3e0, mload(0xd240))
-mstore(0xd400, mload(0xd260))
-                }
-{
-                    mstore(0xd420, mload(0xd300))
-mstore(0xd440, mload(0xd320))
-mstore(0xd460, mload(0xd340))
-mstore(0xd480, mload(0xd360))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xd3a0), 0), eq(mload(0xd3c0), 0)),
-                and(eq(mload(0xd3e0), 0), eq(mload(0xd400), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xd420), 0), eq(mload(0xd440), 0)),
-                and(eq(mload(0xd460), 0), eq(mload(0xd480), 0))
-            )
-            if lhs_inf {
-                mstore(0xd3a0, mload(0xd420))
-                mstore(0xd3c0, mload(0xd440))
-                mstore(0xd3e0, mload(0xd460))
-                mstore(0xd400, mload(0xd480))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xd3a0, 0x100, 0xd3a0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xd4a0, mload(0x18e0))
-mstore(0xd4c0, mload(0x1900))
-mstore(0xd4e0, mload(0x1920))
-mstore(0xd500, mload(0x1940))
-                }
-mstore(0xd520, mload(0x8aa0))
-
-        {
-            let scalar := mload(0xd520)
-            let is_inf := and(
-                and(eq(mload(0xd4a0), 0), eq(mload(0xd4c0), 0)),
-                and(eq(mload(0xd4e0), 0), eq(mload(0xd500), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xd4a0, 0)
-                mstore(0xd4c0, 0)
-                mstore(0xd4e0, 0)
-                mstore(0xd500, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xd4a0, 0xa0, 0xd4a0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xd540, mload(0xd3a0))
-mstore(0xd560, mload(0xd3c0))
-mstore(0xd580, mload(0xd3e0))
-mstore(0xd5a0, mload(0xd400))
-                }
-{
-                    mstore(0xd5c0, mload(0xd4a0))
-mstore(0xd5e0, mload(0xd4c0))
-mstore(0xd600, mload(0xd4e0))
-mstore(0xd620, mload(0xd500))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xd540), 0), eq(mload(0xd560), 0)),
-                and(eq(mload(0xd580), 0), eq(mload(0xd5a0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xd5c0), 0), eq(mload(0xd5e0), 0)),
-                and(eq(mload(0xd600), 0), eq(mload(0xd620), 0))
-            )
-            if lhs_inf {
-                mstore(0xd540, mload(0xd5c0))
-                mstore(0xd560, mload(0xd5e0))
-                mstore(0xd580, mload(0xd600))
-                mstore(0xd5a0, mload(0xd620))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xd540, 0x100, 0xd540, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xd640, mload(0x1760))
-mstore(0xd660, mload(0x1780))
-mstore(0xd680, mload(0x17a0))
-mstore(0xd6a0, mload(0x17c0))
-                }
-mstore(0xd6c0, mload(0x8ac0))
-
-        {
-            let scalar := mload(0xd6c0)
-            let is_inf := and(
-                and(eq(mload(0xd640), 0), eq(mload(0xd660), 0)),
-                and(eq(mload(0xd680), 0), eq(mload(0xd6a0), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xd640, 0)
-                mstore(0xd660, 0)
-                mstore(0xd680, 0)
-                mstore(0xd6a0, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xd640, 0xa0, 0xd640, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xd6e0, mload(0xd540))
-mstore(0xd700, mload(0xd560))
-mstore(0xd720, mload(0xd580))
-mstore(0xd740, mload(0xd5a0))
-                }
-{
-                    mstore(0xd760, mload(0xd640))
-mstore(0xd780, mload(0xd660))
-mstore(0xd7a0, mload(0xd680))
-mstore(0xd7c0, mload(0xd6a0))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xd6e0), 0), eq(mload(0xd700), 0)),
-                and(eq(mload(0xd720), 0), eq(mload(0xd740), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xd760), 0), eq(mload(0xd780), 0)),
-                and(eq(mload(0xd7a0), 0), eq(mload(0xd7c0), 0))
-            )
-            if lhs_inf {
-                mstore(0xd6e0, mload(0xd760))
-                mstore(0xd700, mload(0xd780))
-                mstore(0xd720, mload(0xd7a0))
-                mstore(0xd740, mload(0xd7c0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xd6e0, 0x100, 0xd6e0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xd7e0, mload(0x17e0))
-mstore(0xd800, mload(0x1800))
-mstore(0xd820, mload(0x1820))
-mstore(0xd840, mload(0x1840))
-                }
-mstore(0xd860, mload(0x8ae0))
-
-        {
-            let scalar := mload(0xd860)
-            let is_inf := and(
-                and(eq(mload(0xd7e0), 0), eq(mload(0xd800), 0)),
-                and(eq(mload(0xd820), 0), eq(mload(0xd840), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xd7e0, 0)
-                mstore(0xd800, 0)
-                mstore(0xd820, 0)
-                mstore(0xd840, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xd7e0, 0xa0, 0xd7e0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xd880, mload(0xd6e0))
-mstore(0xd8a0, mload(0xd700))
-mstore(0xd8c0, mload(0xd720))
-mstore(0xd8e0, mload(0xd740))
-                }
-{
-                    mstore(0xd900, mload(0xd7e0))
-mstore(0xd920, mload(0xd800))
-mstore(0xd940, mload(0xd820))
-mstore(0xd960, mload(0xd840))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xd880), 0), eq(mload(0xd8a0), 0)),
-                and(eq(mload(0xd8c0), 0), eq(mload(0xd8e0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xd900), 0), eq(mload(0xd920), 0)),
-                and(eq(mload(0xd940), 0), eq(mload(0xd960), 0))
-            )
-            if lhs_inf {
-                mstore(0xd880, mload(0xd900))
-                mstore(0xd8a0, mload(0xd920))
-                mstore(0xd8c0, mload(0xd940))
-                mstore(0xd8e0, mload(0xd960))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xd880, 0x100, 0xd880, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xd980, mload(0x15a0))
-mstore(0xd9a0, mload(0x15c0))
-mstore(0xd9c0, mload(0x15e0))
-mstore(0xd9e0, mload(0x1600))
-                }
-mstore(0xda00, mload(0x8b00))
-
-        {
-            let scalar := mload(0xda00)
-            let is_inf := and(
-                and(eq(mload(0xd980), 0), eq(mload(0xd9a0), 0)),
-                and(eq(mload(0xd9c0), 0), eq(mload(0xd9e0), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xd980, 0)
-                mstore(0xd9a0, 0)
-                mstore(0xd9c0, 0)
-                mstore(0xd9e0, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xd980, 0xa0, 0xd980, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xda20, mload(0xd880))
-mstore(0xda40, mload(0xd8a0))
-mstore(0xda60, mload(0xd8c0))
-mstore(0xda80, mload(0xd8e0))
-                }
-{
-                    mstore(0xdaa0, mload(0xd980))
-mstore(0xdac0, mload(0xd9a0))
-mstore(0xdae0, mload(0xd9c0))
-mstore(0xdb00, mload(0xd9e0))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xda20), 0), eq(mload(0xda40), 0)),
-                and(eq(mload(0xda60), 0), eq(mload(0xda80), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xdaa0), 0), eq(mload(0xdac0), 0)),
-                and(eq(mload(0xdae0), 0), eq(mload(0xdb00), 0))
-            )
-            if lhs_inf {
-                mstore(0xda20, mload(0xdaa0))
-                mstore(0xda40, mload(0xdac0))
-                mstore(0xda60, mload(0xdae0))
-                mstore(0xda80, mload(0xdb00))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xda20, 0x100, 0xda20, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xdb20, mload(0x2500))
-mstore(0xdb40, mload(0x2520))
-mstore(0xdb60, mload(0x2540))
-mstore(0xdb80, mload(0x2560))
-                }
-mstore(0xdba0, mload(0x8b20))
-
-        {
-            let scalar := mload(0xdba0)
-            let is_inf := and(
-                and(eq(mload(0xdb20), 0), eq(mload(0xdb40), 0)),
-                and(eq(mload(0xdb60), 0), eq(mload(0xdb80), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xdb20, 0)
-                mstore(0xdb40, 0)
-                mstore(0xdb60, 0)
-                mstore(0xdb80, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xdb20, 0xa0, 0xdb20, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xdbc0, mload(0xda20))
-mstore(0xdbe0, mload(0xda40))
-mstore(0xdc00, mload(0xda60))
-mstore(0xdc20, mload(0xda80))
-                }
-{
-                    mstore(0xdc40, mload(0xdb20))
-mstore(0xdc60, mload(0xdb40))
-mstore(0xdc80, mload(0xdb60))
-mstore(0xdca0, mload(0xdb80))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xdbc0), 0), eq(mload(0xdbe0), 0)),
-                and(eq(mload(0xdc00), 0), eq(mload(0xdc20), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xdc40), 0), eq(mload(0xdc60), 0)),
-                and(eq(mload(0xdc80), 0), eq(mload(0xdca0), 0))
-            )
-            if lhs_inf {
-                mstore(0xdbc0, mload(0xdc40))
-                mstore(0xdbe0, mload(0xdc60))
-                mstore(0xdc00, mload(0xdc80))
-                mstore(0xdc20, mload(0xdca0))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xdbc0, 0x100, 0xdbc0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xdcc0, mload(0x26c0))
-mstore(0xdce0, mload(0x26e0))
-mstore(0xdd00, mload(0x2700))
-mstore(0xdd20, mload(0x2720))
-                }
-mstore(0xdd40, mload(0x8c80))
-
-        {
-            let scalar := mload(0xdd40)
-            let is_inf := and(
-                and(eq(mload(0xdcc0), 0), eq(mload(0xdce0), 0)),
-                and(eq(mload(0xdd00), 0), eq(mload(0xdd20), 0))
-            )
-            let should_skip := or(is_inf, eq(scalar, 0))
-            if should_skip {
-                mstore(0xdcc0, 0)
-                mstore(0xdce0, 0)
-                mstore(0xdd00, 0)
-                mstore(0xdd20, 0)
-            }
-            if iszero(should_skip) {
-                success := and(
-                    eq(staticcall(gas(), 0x0c, 0xdcc0, 0xa0, 0xdcc0, 0x80), 1),
-                    success
-                )
-            }
-        }
-{
-                    mstore(0xdd60, mload(0xdbc0))
-mstore(0xdd80, mload(0xdbe0))
-mstore(0xdda0, mload(0xdc00))
-mstore(0xddc0, mload(0xdc20))
-                }
-{
-                    mstore(0xdde0, mload(0xdcc0))
-mstore(0xde00, mload(0xdce0))
-mstore(0xde20, mload(0xdd00))
-mstore(0xde40, mload(0xdd20))
-                }
-
-        {
-            let lhs_inf := and(
-                and(eq(mload(0xdd60), 0), eq(mload(0xdd80), 0)),
-                and(eq(mload(0xdda0), 0), eq(mload(0xddc0), 0))
-            )
-            let rhs_inf := and(
-                and(eq(mload(0xdde0), 0), eq(mload(0xde00), 0)),
-                and(eq(mload(0xde20), 0), eq(mload(0xde40), 0))
-            )
-            if lhs_inf {
-                mstore(0xdd60, mload(0xdde0))
-                mstore(0xdd80, mload(0xde00))
-                mstore(0xdda0, mload(0xde20))
-                mstore(0xddc0, mload(0xde40))
-            }
-            if iszero(or(lhs_inf, rhs_inf)) {
-                success := and(
-                    eq(staticcall(gas(), 0x0b, 0xdd60, 0x100, 0xdd60, 0x80), 1),
-                    success
-                )
-            }
-        }
-
-        {
-            mstore(0xde60, 0x0000000000000000000000000000000017f1d3a73197d7942695638c4fa9ac0f)
-            mstore(0xde80, 0xc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb)
-            mstore(0xdea0, 0x0000000000000000000000000000000008b3f481e3aaa0f1a09e30ed741d8ae4)
-            mstore(0xdec0, 0xfcf5e095d5d00af600db18cb2c04b3edd03cc744a2888ae40caa232946c5e7e1)
-        }
-{
-                    mstore(0xdee0, mload(0xdd60))
-mstore(0xdf00, mload(0xdd80))
-mstore(0xdf20, mload(0xdda0))
-mstore(0xdf40, mload(0xddc0))
-                }
-mstore(0xdf60, 0x00000000000000000000000000000000024aa2b2f08f0a91260805272dc51051)
-mstore(0xdf80, 0xc6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8)
-mstore(0xdfa0, 0x0000000000000000000000000000000013e02b6052719f607dacd3a088274f65)
-mstore(0xdfc0, 0x596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e)
-mstore(0xdfe0, 0x000000000000000000000000000000000ce5d527727d6e118cc9cdc6da2e351a)
-mstore(0xe000, 0xadfd9baa8cbdd3a76d429a695160d12c923ac9cc3baca289e193548608b82801)
-mstore(0xe020, 0x000000000000000000000000000000000606c4a02ea734cc32acd2b02bc28b99)
-mstore(0xe040, 0xcb3e287e85a763af267492ab572e99ab3f370d275cec1da1aaa9075ff05f79be)
-{
-                    mstore(0xe060, mload(0x26c0))
-mstore(0xe080, mload(0x26e0))
-mstore(0xe0a0, mload(0x2700))
-mstore(0xe0c0, mload(0x2720))
-                }
-mstore(0xe0e0, 0x0000000000000000000000000000000005e37bfd4b51756e634a544d46fb18f0)
-mstore(0xe100, 0x75dc77b3be46e909d4772dd7e95e06802ae2586e08007df9b04fb49038d7c244)
-mstore(0xe120, 0x00000000000000000000000000000000055795deea11d5c801728b834307c2e3)
-mstore(0xe140, 0x2c8d43443d92d768c897728e7e64c108d546c7324090962dfbd438b32d34e1f7)
-mstore(0xe160, 0x00000000000000000000000000000000114f72536c8b3597f17d187275332c06)
-mstore(0xe180, 0x91c365591c7caf13653cb9e24e3320135a2483c53689e0e1efbfacbd262a8a81)
-mstore(0xe1a0, 0x0000000000000000000000000000000002e900424c3584facb138d93920c1be0)
-mstore(0xe1c0, 0xc23adce4a30acc13e87a92a37c814c065f18fd4540619e79b6a61aa41d32a602)
-success := and(eq(staticcall(gas(), 0xf, 0xdee0, 0x300, 0xdee0, 0x20), 1), success)
-success := and(eq(mload(0xdee0), 1), success)
-
-            // Revert if anything fails
-            if iszero(success) { revert(0, 0) }
-
-            // Return empty bytes on success
-            return(0, 0)
+                            mstore(0x8dc0, mload(0xfc0))
+mstore(0x8de0, mload(0xfe0))
+mstore(0x8e00, mload(0x1000))
+mstore(0x8e20, mload(0x1020))
+                        }
+mstore(0x8e40, 1)
+{
+                            mstore(0x8e60, mload(0x12c0))
+mstore(0x8e80, mload(0x12e0))
+mstore(0x8ea0, mload(0x1300))
+mstore(0x8ec0, mload(0x1320))
+                        }
+mstore(0x8ee0, mload(0x8540))
+{
+                            mstore(0x8f00, mload(0x1340))
+mstore(0x8f20, mload(0x1360))
+mstore(0x8f40, mload(0x1380))
+mstore(0x8f60, mload(0x13a0))
+                        }
+mstore(0x8f80, mload(0x8560))
+{
+                            mstore(0x8fa0, mload(0x13c0))
+mstore(0x8fc0, mload(0x13e0))
+mstore(0x8fe0, mload(0x1400))
+mstore(0x9000, mload(0x1420))
+                        }
+mstore(0x9020, mload(0x8580))
+{
+                            mstore(0x9040, mload(0x1440))
+mstore(0x9060, mload(0x1460))
+mstore(0x9080, mload(0x1480))
+mstore(0x90a0, mload(0x14a0))
+                        }
+mstore(0x90c0, mload(0x85a0))
+{
+                            mstore(0x90e0, mload(0x14c0))
+mstore(0x9100, mload(0x14e0))
+mstore(0x9120, mload(0x1500))
+mstore(0x9140, mload(0x1520))
+                        }
+mstore(0x9160, mload(0x85c0))
+{
+                            mstore(0x9180, mload(0x1620))
+mstore(0x91a0, mload(0x1640))
+mstore(0x91c0, mload(0x1660))
+mstore(0x91e0, mload(0x1680))
+                        }
+mstore(0x9200, mload(0x85e0))
+{
+                            mstore(0x9220, mload(0x19c0))
+mstore(0x9240, mload(0x19e0))
+mstore(0x9260, mload(0x1a00))
+mstore(0x9280, mload(0x1a20))
+                        }
+mstore(0x92a0, mload(0x8600))
+{
+                            mstore(0x92c0, mload(0x6a0))
+mstore(0x92e0, mload(0x6c0))
+mstore(0x9300, mload(0x6e0))
+mstore(0x9320, mload(0x700))
+                        }
+mstore(0x9340, mload(0x8620))
+{
+                            mstore(0x9360, mload(0x420))
+mstore(0x9380, mload(0x440))
+mstore(0x93a0, mload(0x460))
+mstore(0x93c0, mload(0x480))
+                        }
+mstore(0x93e0, mload(0x8640))
+{
+                            mstore(0x9400, mload(0x4a0))
+mstore(0x9420, mload(0x4c0))
+mstore(0x9440, mload(0x4e0))
+mstore(0x9460, mload(0x500))
+                        }
+mstore(0x9480, mload(0x8660))
+{
+                            mstore(0x94a0, mload(0x520))
+mstore(0x94c0, mload(0x540))
+mstore(0x94e0, mload(0x560))
+mstore(0x9500, mload(0x580))
+                        }
+mstore(0x9520, mload(0x8680))
+{
+                            mstore(0x9540, mload(0x5a0))
+mstore(0x9560, mload(0x5c0))
+mstore(0x9580, mload(0x5e0))
+mstore(0x95a0, mload(0x600))
+                        }
+mstore(0x95c0, mload(0x86a0))
+{
+                            mstore(0x95e0, mload(0x620))
+mstore(0x9600, mload(0x640))
+mstore(0x9620, mload(0x660))
+mstore(0x9640, mload(0x680))
+                        }
+mstore(0x9660, mload(0x86c0))
+{
+                            mstore(0x9680, mload(0x220))
+mstore(0x96a0, mload(0x240))
+mstore(0x96c0, mload(0x260))
+mstore(0x96e0, mload(0x280))
+                        }
+mstore(0x9700, mload(0x86e0))
+{
+                            mstore(0x9720, mload(0x2a0))
+mstore(0x9740, mload(0x2c0))
+mstore(0x9760, mload(0x2e0))
+mstore(0x9780, mload(0x300))
+                        }
+mstore(0x97a0, mload(0x8700))
+{
+                            mstore(0x97c0, mload(0x320))
+mstore(0x97e0, mload(0x340))
+mstore(0x9800, mload(0x360))
+mstore(0x9820, mload(0x380))
+                        }
+mstore(0x9840, mload(0x8720))
+{
+                            mstore(0x9860, mload(0x3a0))
+mstore(0x9880, mload(0x3c0))
+mstore(0x98a0, mload(0x3e0))
+mstore(0x98c0, mload(0x400))
+                        }
+mstore(0x98e0, mload(0x8740))
+{
+                            mstore(0x9900, mload(0x720))
+mstore(0x9920, mload(0x740))
+mstore(0x9940, mload(0x760))
+mstore(0x9960, mload(0x780))
+                        }
+mstore(0x9980, mload(0x8760))
+{
+                            mstore(0x99a0, mload(0x7a0))
+mstore(0x99c0, mload(0x7c0))
+mstore(0x99e0, mload(0x7e0))
+mstore(0x9a00, mload(0x800))
+                        }
+mstore(0x9a20, mload(0x8780))
+{
+                            mstore(0x9a40, mload(0x820))
+mstore(0x9a60, mload(0x840))
+mstore(0x9a80, mload(0x860))
+mstore(0x9aa0, mload(0x880))
+                        }
+mstore(0x9ac0, mload(0x87a0))
+{
+                            mstore(0x9ae0, mload(0x8a0))
+mstore(0x9b00, mload(0x8c0))
+mstore(0x9b20, mload(0x8e0))
+mstore(0x9b40, mload(0x900))
+                        }
+mstore(0x9b60, mload(0x87c0))
+{
+                            mstore(0x9b80, mload(0x920))
+mstore(0x9ba0, mload(0x940))
+mstore(0x9bc0, mload(0x960))
+mstore(0x9be0, mload(0x980))
+                        }
+mstore(0x9c00, mload(0x87e0))
+{
+                            mstore(0x9c20, mload(0x9a0))
+mstore(0x9c40, mload(0x9c0))
+mstore(0x9c60, mload(0x9e0))
+mstore(0x9c80, mload(0xa00))
+                        }
+mstore(0x9ca0, mload(0x8800))
+{
+                            mstore(0x9cc0, mload(0xa20))
+mstore(0x9ce0, mload(0xa40))
+mstore(0x9d00, mload(0xa60))
+mstore(0x9d20, mload(0xa80))
+                        }
+mstore(0x9d40, mload(0x8820))
+{
+                            mstore(0x9d60, mload(0xaa0))
+mstore(0x9d80, mload(0xac0))
+mstore(0x9da0, mload(0xae0))
+mstore(0x9dc0, mload(0xb00))
+                        }
+mstore(0x9de0, mload(0x8840))
+{
+                            mstore(0x9e00, mload(0xb20))
+mstore(0x9e20, mload(0xb40))
+mstore(0x9e40, mload(0xb60))
+mstore(0x9e60, mload(0xb80))
+                        }
+mstore(0x9e80, mload(0x8860))
+{
+                            mstore(0x9ea0, mload(0xba0))
+mstore(0x9ec0, mload(0xbc0))
+mstore(0x9ee0, mload(0xbe0))
+mstore(0x9f00, mload(0xc00))
+                        }
+mstore(0x9f20, mload(0x8880))
+{
+                            mstore(0x9f40, mload(0xc20))
+mstore(0x9f60, mload(0xc40))
+mstore(0x9f80, mload(0xc60))
+mstore(0x9fa0, mload(0xc80))
+                        }
+mstore(0x9fc0, mload(0x88a0))
+{
+                            mstore(0x9fe0, mload(0xca0))
+mstore(0xa000, mload(0xcc0))
+mstore(0xa020, mload(0xce0))
+mstore(0xa040, mload(0xd00))
+                        }
+mstore(0xa060, mload(0x88c0))
+{
+                            mstore(0xa080, mload(0xd20))
+mstore(0xa0a0, mload(0xd40))
+mstore(0xa0c0, mload(0xd60))
+mstore(0xa0e0, mload(0xd80))
+                        }
+mstore(0xa100, mload(0x88e0))
+{
+                            mstore(0xa120, mload(0xda0))
+mstore(0xa140, mload(0xdc0))
+mstore(0xa160, mload(0xde0))
+mstore(0xa180, mload(0xe00))
+                        }
+mstore(0xa1a0, mload(0x8900))
+{
+                            mstore(0xa1c0, mload(0xe20))
+mstore(0xa1e0, mload(0xe40))
+mstore(0xa200, mload(0xe60))
+mstore(0xa220, mload(0xe80))
+                        }
+mstore(0xa240, mload(0x8920))
+{
+                            mstore(0xa260, mload(0xea0))
+mstore(0xa280, mload(0xec0))
+mstore(0xa2a0, mload(0xee0))
+mstore(0xa2c0, mload(0xf00))
+                        }
+mstore(0xa2e0, mload(0x8940))
+{
+                            mstore(0xa300, mload(0xf20))
+mstore(0xa320, mload(0xf40))
+mstore(0xa340, mload(0xf60))
+mstore(0xa360, mload(0xf80))
+                        }
+mstore(0xa380, mload(0x8960))
+{
+                            mstore(0xa3a0, mload(0x1b20))
+mstore(0xa3c0, mload(0x1b40))
+mstore(0xa3e0, mload(0x1b60))
+mstore(0xa400, mload(0x1b80))
+                        }
+mstore(0xa420, mload(0x8980))
+{
+                            mstore(0xa440, mload(0x1ba0))
+mstore(0xa460, mload(0x1bc0))
+mstore(0xa480, mload(0x1be0))
+mstore(0xa4a0, mload(0x1c00))
+                        }
+mstore(0xa4c0, mload(0x89a0))
+{
+                            mstore(0xa4e0, mload(0x1c20))
+mstore(0xa500, mload(0x1c40))
+mstore(0xa520, mload(0x1c60))
+mstore(0xa540, mload(0x1c80))
+                        }
+mstore(0xa560, mload(0x89c0))
+{
+                            mstore(0xa580, mload(0x1ca0))
+mstore(0xa5a0, mload(0x1cc0))
+mstore(0xa5c0, mload(0x1ce0))
+mstore(0xa5e0, mload(0x1d00))
+                        }
+mstore(0xa600, mload(0x89e0))
+{
+                            mstore(0xa620, mload(0x1a40))
+mstore(0xa640, mload(0x1a60))
+mstore(0xa660, mload(0x1a80))
+mstore(0xa680, mload(0x1aa0))
+                        }
+mstore(0xa6a0, mload(0x8a00))
+{
+                            mstore(0xa6c0, mload(0x1140))
+mstore(0xa6e0, mload(0x1160))
+mstore(0xa700, mload(0x1180))
+mstore(0xa720, mload(0x11a0))
+                        }
+mstore(0xa740, mload(0x8a20))
+{
+                            mstore(0xa760, mload(0x11c0))
+mstore(0xa780, mload(0x11e0))
+mstore(0xa7a0, mload(0x1200))
+mstore(0xa7c0, mload(0x1220))
+                        }
+mstore(0xa7e0, mload(0x8a40))
+{
+                            mstore(0xa800, mload(0x1240))
+mstore(0xa820, mload(0x1260))
+mstore(0xa840, mload(0x1280))
+mstore(0xa860, mload(0x12a0))
+                        }
+mstore(0xa880, mload(0x8a60))
+{
+                            mstore(0xa8a0, mload(0x1860))
+mstore(0xa8c0, mload(0x1880))
+mstore(0xa8e0, mload(0x18a0))
+mstore(0xa900, mload(0x18c0))
+                        }
+mstore(0xa920, mload(0x8a80))
+{
+                            mstore(0xa940, mload(0x18e0))
+mstore(0xa960, mload(0x1900))
+mstore(0xa980, mload(0x1920))
+mstore(0xa9a0, mload(0x1940))
+                        }
+mstore(0xa9c0, mload(0x8aa0))
+{
+                            mstore(0xa9e0, mload(0x1760))
+mstore(0xaa00, mload(0x1780))
+mstore(0xaa20, mload(0x17a0))
+mstore(0xaa40, mload(0x17c0))
+                        }
+mstore(0xaa60, mload(0x8ac0))
+{
+                            mstore(0xaa80, mload(0x17e0))
+mstore(0xaaa0, mload(0x1800))
+mstore(0xaac0, mload(0x1820))
+mstore(0xaae0, mload(0x1840))
+                        }
+mstore(0xab00, mload(0x8ae0))
+{
+                            mstore(0xab20, mload(0x15a0))
+mstore(0xab40, mload(0x15c0))
+mstore(0xab60, mload(0x15e0))
+mstore(0xab80, mload(0x1600))
+                        }
+mstore(0xaba0, mload(0x8b00))
+{
+                            mstore(0xabc0, mload(0x2500))
+mstore(0xabe0, mload(0x2520))
+mstore(0xac00, mload(0x2540))
+mstore(0xac20, mload(0x2560))
+                        }
+mstore(0xac40, mload(0x8b20))
+{
+                            mstore(0xac60, mload(0x26c0))
+mstore(0xac80, mload(0x26e0))
+mstore(0xaca0, mload(0x2700))
+mstore(0xacc0, mload(0x2720))
+                        }
+mstore(0xace0, mload(0x8c80))
+success := and(eq(staticcall(gas(), 0xc, 0x8d20, 0x1fe0, 0xad00, 0x80), 1), success)
+mstore(0xad80, 0x0000000000000000000000000000000017f1d3a73197d7942695638c4fa9ac0f)
+mstore(0xada0, 0xc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb)
+mstore(0xadc0, 0x0000000000000000000000000000000008b3f481e3aaa0f1a09e30ed741d8ae4)
+mstore(0xade0, 0xfcf5e095d5d00af600db18cb2c04b3edd03cc744a2888ae40caa232946c5e7e1)
+{
+                            mstore(0xae00, mload(0xad00))
+mstore(0xae20, mload(0xad20))
+mstore(0xae40, mload(0xad40))
+mstore(0xae60, mload(0xad60))
+                        }
+mstore(0xae80, 0x00000000000000000000000000000000024aa2b2f08f0a91260805272dc51051)
+mstore(0xaea0, 0xc6e47ad4fa403b02b4510b647ae3d1770bac0326a805bbefd48056c8c121bdb8)
+mstore(0xaec0, 0x0000000000000000000000000000000013e02b6052719f607dacd3a088274f65)
+mstore(0xaee0, 0x596bd0d09920b61ab5da61bbdc7f5049334cf11213945d57e5ac7d055d042b7e)
+mstore(0xaf00, 0x000000000000000000000000000000000ce5d527727d6e118cc9cdc6da2e351a)
+mstore(0xaf20, 0xadfd9baa8cbdd3a76d429a695160d12c923ac9cc3baca289e193548608b82801)
+mstore(0xaf40, 0x000000000000000000000000000000000606c4a02ea734cc32acd2b02bc28b99)
+mstore(0xaf60, 0xcb3e287e85a763af267492ab572e99ab3f370d275cec1da1aaa9075ff05f79be)
+{
+                            mstore(0xaf80, mload(0x26c0))
+mstore(0xafa0, mload(0x26e0))
+mstore(0xafc0, mload(0x2700))
+mstore(0xafe0, mload(0x2720))
+                        }
+mstore(0xb000, 0x00000000000000000000000000000000096d0e204d5b61e84c5d7cc5b5e39c12)
+mstore(0xb020, 0x90b8f96c46ed27718c102c4336da31dd4df87e11d2b4e7c5fd5133fa97e6706a)
+mstore(0xb040, 0x0000000000000000000000000000000003bb68964496acb25ca0d6bdf84dcfba)
+mstore(0xb060, 0x9ea623ab34811d61556f3fed354fb835cfb99e803f547fdb69d26719c1bdc7ce)
+mstore(0xb080, 0x00000000000000000000000000000000188f5e74480055cdb14f0112b46a8fa6)
+mstore(0xb0a0, 0x2f83afc4d4082f238dcd36c8c42775cf3b4af715f36f01f1ebcf64c42d477c68)
+mstore(0xb0c0, 0x00000000000000000000000000000000180c2525636ad5f070ef81e383ab8185)
+mstore(0xb0e0, 0x8dc30be51d754aa4073faf3a784f5ad1362907ce098fadfc71f4e966e4ad6c78)
+success := and(eq(staticcall(gas(), 0xf, 0xae00, 0x300, 0xae00, 0x20), 1), success)
+success := and(eq(mload(0xae00), 1), success)
+
+                    // Revert if anything fails
+                    if iszero(success) { revert(0, 0) }
+
+                    // Return empty bytes on success
+                    return(0, 0)
 
         }
     }

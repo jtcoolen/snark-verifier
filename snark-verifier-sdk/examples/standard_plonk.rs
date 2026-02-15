@@ -149,9 +149,7 @@ fn main() {
                 }
             }
         } else {
-            println!(
-                "revm verification skipped (set RUN_REVM=1 to run local revm simulation)"
-            );
+            println!("revm verification skipped (set RUN_REVM=1 to run local revm simulation)");
         }
     }
 }

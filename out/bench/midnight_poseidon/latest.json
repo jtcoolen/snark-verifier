@@ -1,0 +1,26 @@
+{
+  "calldata_bytes": 4000,
+  "compressed": {
+    "calldata_byte_delta": -1034,
+    "calldata_bytes": 2966,
+    "deployment_code_bytes": 41479,
+    "proof_byte_delta": -1034,
+    "proof_bytes": 2934
+  },
+  "deployment_code_bytes": 21574,
+  "proof_bytes": 3968,
+  "revm": {
+    "call_gas_delta_compressed_minus_uncompressed": 424036,
+    "compressed": {
+      "call_gas": 1025441,
+      "error": null,
+      "status": "ok"
+    },
+    "preferred_variant": "uncompressed",
+    "uncompressed": {
+      "call_gas": 601405,
+      "error": null,
+      "status": "ok"
+    }
+  }
+}

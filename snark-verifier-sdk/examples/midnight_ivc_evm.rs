@@ -1,7 +1,7 @@
 //! Generate and verify an IVC proof (ported from `zk_stdlib/examples/ivc.rs`) with
 //! Midnight's EVM transcript, then emit Solidity verifier + calldata artifacts.
 //! Run with:
-//!   cargo run --example midnight_ivc_evm --features midnight,loader_evm,revm -p snark-verifier-sdk
+//!   RUN_REVM=1 cargo run --example midnight_ivc_evm --features midnight,loader_evm,revm -p snark-verifier-sdk
 //! Note: this example is intentionally slow.
 
 use ff::Field;
@@ -73,6 +73,18 @@ fn extract_revm_gas(message: &str) -> Option<u64> {
         return None;
     }
     digits.parse().ok()
+}
+
+#[cfg(feature = "revm")]
+fn run_revm_enabled() -> bool {
+    std::env::var("RUN_REVM")
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "y" | "on"
+            )
+        })
+        .unwrap_or(false)
 }
 
 #[derive(Clone, Debug)]
@@ -755,7 +767,19 @@ fn main() {
     });
 
     #[cfg(feature = "revm")]
-    {
+    let run_revm = run_revm_enabled();
+
+    #[cfg(feature = "revm")]
+    if run_revm {
+        println!("=== REVM deployment + verification gas benchmarks ===");
+    } else {
+        println!(
+            "RUN_REVM is not enabled; skipping revm deployment/call gas benchmarks. Set RUN_REVM=1 to enable."
+        );
+    }
+
+    #[cfg(feature = "revm")]
+    if run_revm {
         match bundle.verify_with_generated_solidity_revm_with_metrics() {
             Ok(metrics) => {
                 println!("revm deployment gas: {}", metrics.deployment_gas);
@@ -854,6 +878,10 @@ fn main() {
                     metrics.deployment_gas()
                 );
                 println!("revm unrolled-sharded gas: {}", metrics.call_gas);
+                println!(
+                    "proof verification gas (unrolled-sharded call): {}",
+                    metrics.call_gas
+                );
                 revm_unrolled_sharded = json!({
                     "status": "ok",
                     "deployment_gas": metrics.deployment_gas(),

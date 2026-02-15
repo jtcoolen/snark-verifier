@@ -195,7 +195,9 @@ where
         .collect_vec();
 
     // Reconstruct f(x3) from q-evals and point sets.
-    let mut f_eval = loader.load_zero();
+    // Batch all interpolation and final-round denominators into one inversion pass.
+    let mut f_eval_terms = Vec::with_capacity(point_sets.len());
+    let mut den_pool = Vec::<L::LoadedScalar>::new();
     for ((shifts, evals), proof_eval) in
         point_sets.iter().zip(q_eval_sets.iter()).zip(proof.q_evals_on_x3.iter()).rev()
     {
@@ -211,16 +213,55 @@ where
                     })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let r_eval = lagrange_interpolate_eval_loaded::<C, L>(&points, evals, &proof.x3)?;
 
+        if points.len() != evals.len() {
+            return Err(Error::InvalidProtocol(format!(
+                "lagrange interpolation size mismatch: points={}, evals={}",
+                points.len(),
+                evals.len()
+            )));
+        }
+
+        let lagrange_start = den_pool.len();
+        if points.len() > 1 {
+            den_pool.extend((0..points.len()).map(|j| {
+                points
+                    .iter()
+                    .enumerate()
+                    .filter(|(k, _)| *k != j)
+                    .fold(loader.load_one(), |acc, (_, x_k)| acc * &(points[j].clone() - x_k))
+            }));
+        }
         let den =
             points.iter().fold(loader.load_one(), |acc, point| acc * &(proof.x3.clone() - point));
-        let den_inv = den.invert().ok_or_else(|| {
-            Error::InvalidProtocol(
-                "encountered non-invertible denominator while computing f(x3)".to_string(),
-            )
-        })?;
-        let eval = (proof_eval.clone() - r_eval) * &den_inv;
+        let den_idx = den_pool.len();
+        den_pool.push(den);
+
+        f_eval_terms.push((proof_eval.clone(), evals.clone(), points, lagrange_start, den_idx));
+    }
+
+    if !den_pool.is_empty() {
+        <L as ScalarLoader<C::ScalarExt>>::batch_invert(den_pool.iter_mut());
+    }
+
+    let mut f_eval = loader.load_zero();
+    for (proof_eval, evals, points, lagrange_start, den_idx) in f_eval_terms {
+        let r_eval = if points.is_empty() {
+            loader.load_zero()
+        } else if points.len() == 1 {
+            evals[0].clone()
+        } else {
+            evals.iter().enumerate().fold(loader.load_zero(), |acc, (j, eval)| {
+                let numer = points
+                    .iter()
+                    .enumerate()
+                    .filter(|(k, _)| *k != j)
+                    .fold(loader.load_one(), |acc, (_, point)| acc * &(proof.x3.clone() - point));
+                acc + eval.clone() * &numer * &den_pool[lagrange_start + j]
+            })
+        };
+
+        let eval = (proof_eval - r_eval) * &den_pool[den_idx];
         f_eval = f_eval * &proof.x2 + &eval;
     }
 
@@ -321,52 +362,6 @@ where
         }
     }
     result
-}
-
-fn lagrange_interpolate_eval_loaded<C, L>(
-    points: &[L::LoadedScalar],
-    evals: &[L::LoadedScalar],
-    at: &L::LoadedScalar,
-) -> Result<L::LoadedScalar, Error>
-where
-    C: CurveAffine,
-    L: Loader<C>,
-{
-    if points.len() != evals.len() {
-        return Err(Error::InvalidProtocol(format!(
-            "lagrange interpolation size mismatch: points={}, evals={}",
-            points.len(),
-            evals.len()
-        )));
-    }
-    let loader = at.loader().clone();
-    if points.is_empty() {
-        return Ok(loader.load_zero());
-    }
-    if points.len() == 1 {
-        return Ok(evals[0].clone());
-    }
-
-    let mut denom = (0..points.len())
-        .map(|j| {
-            points
-                .iter()
-                .enumerate()
-                .filter(|(k, _)| *k != j)
-                .fold(loader.load_one(), |acc, (_, x_k)| acc * &(points[j].clone() - x_k))
-        })
-        .collect_vec();
-    <L as ScalarLoader<C::ScalarExt>>::batch_invert(denom.iter_mut());
-
-    let value = evals.iter().enumerate().fold(loader.load_zero(), |acc, (j, eval)| {
-        let numer = points
-            .iter()
-            .enumerate()
-            .filter(|(k, _)| *k != j)
-            .fold(loader.load_one(), |acc, (_, point)| acc * &(at.clone() - point));
-        acc + eval.clone() * &numer * &denom[j]
-    });
-    Ok(value)
 }
 
 impl<M> CostEstimation<M::G1Affine> for KzgAs<M, Midnight>

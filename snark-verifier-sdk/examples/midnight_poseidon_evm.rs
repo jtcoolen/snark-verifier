@@ -15,6 +15,7 @@ use midnight_proofs::{
 use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
 use rand::{rngs::OsRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
+use serde_json::json;
 use snark_verifier_sdk::{
     midnight_adapter::MidnightProofBundle,
     midnight_evm_transcript::{MidnightEvmHash, MidnightEvmHashCompressed},
@@ -107,17 +108,19 @@ fn main() {
         bundle.generate_evm_verifier_bytecode().expect("failed to compile Solidity verifier");
     let calldata = bundle.encode_evm_calldata().expect("failed to encode EVM calldata");
 
-    let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples");
+    let out_dir = std::env::var_os("MIDNIGHT_EVM_OUT_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples"));
+    std::fs::create_dir_all(&out_dir).expect("failed to create output directory");
     let solidity_path = out_dir.join("MidnightPoseidonVerifier.sol");
     let bytecode_path = out_dir.join("midnight_poseidon.bytecode");
     let calldata_path = out_dir.join("midnight_poseidon.calldata");
+    let bench_summary_path = out_dir.join("midnight_poseidon_bench.json");
 
-    std::fs::write(&solidity_path, &solidity)
-        .expect("failed to write Solidity verifier");
+    std::fs::write(&solidity_path, &solidity).expect("failed to write Solidity verifier");
     std::fs::write(&bytecode_path, format!("0x{}", hex::encode(&bytecode)))
         .expect("failed to write verifier bytecode");
-    std::fs::write(&calldata_path, hex::encode(&calldata))
-        .expect("failed to write calldata");
+    std::fs::write(&calldata_path, hex::encode(&calldata)).expect("failed to write calldata");
 
     println!("proof bytes: {}", proof.len());
     println!("deployment code bytes: {}", bytecode.len());
@@ -155,9 +158,8 @@ fn main() {
     let bytecode_compressed = bundle_compressed
         .generate_evm_verifier_bytecode_compressed_proof()
         .expect("failed to compile compressed Solidity verifier");
-    let calldata_compressed = bundle_compressed
-        .encode_evm_calldata()
-        .expect("failed to encode compressed EVM calldata");
+    let calldata_compressed =
+        bundle_compressed.encode_evm_calldata().expect("failed to encode compressed EVM calldata");
 
     let solidity_compressed_path = out_dir.join("MidnightPoseidonVerifierCompressed.sol");
     let bytecode_compressed_path = out_dir.join("midnight_poseidon_compressed.bytecode");
@@ -165,11 +167,8 @@ fn main() {
 
     std::fs::write(&solidity_compressed_path, &solidity_compressed)
         .expect("failed to write compressed Solidity verifier");
-    std::fs::write(
-        &bytecode_compressed_path,
-        format!("0x{}", hex::encode(&bytecode_compressed)),
-    )
-    .expect("failed to write compressed verifier bytecode");
+    std::fs::write(&bytecode_compressed_path, format!("0x{}", hex::encode(&bytecode_compressed)))
+        .expect("failed to write compressed verifier bytecode");
     std::fs::write(&calldata_compressed_path, hex::encode(&calldata_compressed))
         .expect("failed to write compressed calldata");
 
@@ -188,6 +187,17 @@ fn main() {
     println!("wrote {}", bytecode_compressed_path.display());
     println!("wrote {}", calldata_compressed_path.display());
 
+    let mut revm_uncompressed = json!({
+        "status": "skipped",
+        "call_gas": null,
+        "error": null
+    });
+    let mut revm_compressed = json!({
+        "status": "skipped",
+        "call_gas": null,
+        "error": null
+    });
+
     #[cfg(feature = "revm")]
     {
         if std::env::var("RUN_REVM").ok().as_deref() == Some("1") {
@@ -195,6 +205,11 @@ fn main() {
                 .verify_with_generated_solidity_revm()
                 .expect("revm verification (uncompressed) should succeed");
             println!("revm gas (uncompressed): {gas}");
+            revm_uncompressed = json!({
+                "status": "ok",
+                "call_gas": gas,
+                "error": null
+            });
 
             match bundle_compressed.verify_with_generated_solidity_revm_compressed_proof() {
                 Ok(gas_compressed) => {
@@ -203,13 +218,66 @@ fn main() {
                         "revm gas delta (compressed - uncompressed): {}",
                         gas_compressed as i64 - gas as i64
                     );
+                    revm_compressed = json!({
+                        "status": "ok",
+                        "call_gas": gas_compressed,
+                        "error": null
+                    });
                 }
                 Err(err) => {
                     println!("revm compressed verification failed: {err}");
+                    revm_compressed = json!({
+                        "status": "error",
+                        "call_gas": null,
+                        "error": err.to_string()
+                    });
                 }
             }
         } else {
             println!("revm verification skipped (set RUN_REVM=1 to run local revm simulation)");
         }
     }
+
+    let uncompressed_gas = revm_uncompressed.get("call_gas").and_then(serde_json::Value::as_u64);
+    let compressed_gas = revm_compressed.get("call_gas").and_then(serde_json::Value::as_u64);
+    let preferred_variant = match (uncompressed_gas, compressed_gas) {
+        (Some(u), Some(c)) => {
+            if c < u {
+                "compressed"
+            } else {
+                "uncompressed"
+            }
+        }
+        _ => "unknown",
+    };
+    let call_gas_delta = match (uncompressed_gas, compressed_gas) {
+        (Some(u), Some(c)) => Some(c as i64 - u as i64),
+        _ => None,
+    };
+
+    let summary = json!({
+        "proof_bytes": proof.len(),
+        "deployment_code_bytes": bytecode.len(),
+        "calldata_bytes": calldata.len(),
+        "compressed": {
+            "proof_bytes": proof_compressed.len(),
+            "deployment_code_bytes": bytecode_compressed.len(),
+            "calldata_bytes": calldata_compressed.len(),
+            "proof_byte_delta": proof_compressed.len() as i64 - proof.len() as i64,
+            "calldata_byte_delta": calldata_compressed.len() as i64 - calldata.len() as i64
+        },
+        "revm": {
+            "uncompressed": revm_uncompressed,
+            "compressed": revm_compressed,
+            "call_gas_delta_compressed_minus_uncompressed": call_gas_delta,
+            "preferred_variant": preferred_variant
+        }
+    });
+    std::fs::write(
+        &bench_summary_path,
+        serde_json::to_string_pretty(&summary).expect("failed to serialize bench summary"),
+    )
+    .expect("failed to write Poseidon bench summary JSON");
+    println!("wrote {}", bench_summary_path.display());
+    println!("bench-summary-json={}", bench_summary_path.display());
 }

@@ -356,14 +356,7 @@ where
                 common_poly_eval.zn().pow_const(protocol.quotient.chunk_degree as u64)
             }
             QuotientChunkBase::ZnMinusOne => {
-                let z_inv = common_poly_eval
-                    .get(crate::verifier::plonk::CommonPolynomial::Identity)
-                    .invert()
-                    .ok_or_else(|| {
-                        Error::InvalidProtocol(
-                            "Missing inverse for quotient split base".to_string(),
-                        )
-                    })?;
+                let z_inv = common_poly_eval.identity_inv().clone();
                 (common_poly_eval.zn().clone() * &z_inv)
                     .pow_const(protocol.quotient.chunk_degree as u64)
             }

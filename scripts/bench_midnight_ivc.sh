@@ -27,7 +27,7 @@ mkdir -p "${RUN_DIR}" "${ARTIFACT_DIR}"
 echo "Running midnight_ivc_evm benchmark..."
 echo "  output: ${RUN_DIR}"
 
-MIDNIGHT_EVM_OUT_DIR="${ARTIFACT_DIR}" \
+RUN_REVM=1 MIDNIGHT_EVM_OUT_DIR="${ARTIFACT_DIR}" \
   cargo run --example midnight_ivc_evm --features midnight,loader_evm,revm -p snark-verifier-sdk \
   | tee "${LOG_PATH}"
 

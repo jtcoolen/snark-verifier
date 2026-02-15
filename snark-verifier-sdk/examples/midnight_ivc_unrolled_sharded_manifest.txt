@@ -5,5 +5,5 @@ shard_statement_start_indices: [0, 1152, 2304, 3392]
 shard_statement_end_indices: [1152, 2304, 3392, 4334]
 dispatcher_runtime_code_bytes: 189
 dispatcher_deployment_code_bytes: 954
-shard_runtime_code_bytes: [24223, 24271, 23883, 18670]
-shard_deployment_code_bytes: [24251, 24299, 23911, 18698]
+shard_runtime_code_bytes: [24221, 24271, 23883, 18670]
+shard_deployment_code_bytes: [24249, 24299, 23911, 18698]

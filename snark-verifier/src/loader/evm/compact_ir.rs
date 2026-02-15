@@ -2,7 +2,7 @@
 
 use super::U256;
 
-pub const COMPACT_OPCODE_VERSION: u32 = 1;
+pub const COMPACT_OPCODE_VERSION: u32 = 2;
 pub const COMPACT_PAGE_BYTES: usize = 24_576;
 
 const OP_MSTORE_CONST: u8 = 1;
@@ -22,6 +22,13 @@ const OP_MOD_FROM_MEM: u8 = 14;
 const OP_SCALAR_NEG_MEM: u8 = 15;
 const OP_SCALAR_ADD_MEM_MEM: u8 = 16;
 const OP_SCALAR_MUL_MEM_MEM: u8 = 17;
+const OP_SCALAR_ADD_MEM_CONST: u8 = 18;
+const OP_SCALAR_MUL_MEM_CONST: u8 = 19;
+const OP_SCALAR_MUL_ADD_MEM_MEM_MEM: u8 = 20;
+const OP_SCALAR_MUL_ADD_MEM_MEM_CONST: u8 = 21;
+const OP_CALLDATA_POINT_COMPRESSED: u8 = 22;
+const OP_STATICCALL_SIZED: u8 = 23;
+const OP_SCALAR_MUL_ADD_MEM_CONST_MEM: u8 = 24;
 
 const OPERAND_TAG_MEM: u8 = 0;
 const OPERAND_TAG_CONST: u8 = 1;
@@ -109,6 +116,46 @@ pub enum CompactInstruction {
         dst: usize,
         lhs: usize,
         rhs: usize,
+    },
+    ScalarAddMemConst {
+        dst: usize,
+        lhs: usize,
+        rhs: U256,
+    },
+    ScalarMulMemConst {
+        dst: usize,
+        lhs: usize,
+        rhs: U256,
+    },
+    ScalarMulAddMemMemMem {
+        dst: usize,
+        mul_lhs: usize,
+        mul_rhs: usize,
+        addend: usize,
+    },
+    ScalarMulAddMemMemConst {
+        dst: usize,
+        mul_lhs: usize,
+        mul_rhs: usize,
+        addend: U256,
+    },
+    ScalarMulAddMemConstMem {
+        dst: usize,
+        mul_lhs: usize,
+        mul_rhs_const: U256,
+        addend: usize,
+    },
+    CalldataPointCompressed {
+        dst: usize,
+        offset: usize,
+        coord_bytes: usize,
+    },
+    StaticCallSized {
+        precompile: usize,
+        cd_ptr: usize,
+        cd_len: usize,
+        rd_ptr: usize,
+        rd_len: usize,
     },
 }
 
@@ -313,6 +360,53 @@ fn encode_instruction(instruction: &CompactInstruction, out: &mut Vec<U256>) {
             out.push(U256::from(*lhs));
             out.push(U256::from(*rhs));
         }
+        CompactInstruction::ScalarAddMemConst { dst, lhs, rhs } => {
+            out.push(header(OP_SCALAR_ADD_MEM_CONST, 4));
+            out.push(U256::from(*dst));
+            out.push(U256::from(*lhs));
+            out.push(*rhs);
+        }
+        CompactInstruction::ScalarMulMemConst { dst, lhs, rhs } => {
+            out.push(header(OP_SCALAR_MUL_MEM_CONST, 4));
+            out.push(U256::from(*dst));
+            out.push(U256::from(*lhs));
+            out.push(*rhs);
+        }
+        CompactInstruction::ScalarMulAddMemMemMem { dst, mul_lhs, mul_rhs, addend } => {
+            out.push(header(OP_SCALAR_MUL_ADD_MEM_MEM_MEM, 5));
+            out.push(U256::from(*dst));
+            out.push(U256::from(*mul_lhs));
+            out.push(U256::from(*mul_rhs));
+            out.push(U256::from(*addend));
+        }
+        CompactInstruction::ScalarMulAddMemMemConst { dst, mul_lhs, mul_rhs, addend } => {
+            out.push(header(OP_SCALAR_MUL_ADD_MEM_MEM_CONST, 5));
+            out.push(U256::from(*dst));
+            out.push(U256::from(*mul_lhs));
+            out.push(U256::from(*mul_rhs));
+            out.push(*addend);
+        }
+        CompactInstruction::ScalarMulAddMemConstMem { dst, mul_lhs, mul_rhs_const, addend } => {
+            out.push(header(OP_SCALAR_MUL_ADD_MEM_CONST_MEM, 5));
+            out.push(U256::from(*dst));
+            out.push(U256::from(*mul_lhs));
+            out.push(*mul_rhs_const);
+            out.push(U256::from(*addend));
+        }
+        CompactInstruction::CalldataPointCompressed { dst, offset, coord_bytes } => {
+            out.push(header(OP_CALLDATA_POINT_COMPRESSED, 4));
+            out.push(U256::from(*dst));
+            out.push(U256::from(*offset));
+            out.push(U256::from(*coord_bytes));
+        }
+        CompactInstruction::StaticCallSized { precompile, cd_ptr, cd_len, rd_ptr, rd_len } => {
+            out.push(header(OP_STATICCALL_SIZED, 6));
+            out.push(U256::from(*precompile));
+            out.push(U256::from(*cd_ptr));
+            out.push(U256::from(*cd_len));
+            out.push(U256::from(*rd_ptr));
+            out.push(U256::from(*rd_len));
+        }
     }
 }
 
@@ -326,5 +420,104 @@ fn encode_operand(operand: &CompactOperand, out: &mut Vec<U256>) {
             out.push(U256::from(OPERAND_TAG_CONST));
             out.push(*value);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn header_bytes(word: U256) -> (u8, u8) {
+        let bytes = word.to_be_bytes::<32>();
+        (bytes[0], bytes[1])
+    }
+
+    #[test]
+    fn compact_opcode_version_is_v2() {
+        assert_eq!(COMPACT_OPCODE_VERSION, 2);
+    }
+
+    #[test]
+    fn scalar_add_mem_const_encoding() {
+        let mut builder = CompactProgramBuilder::new();
+        builder.push(CompactInstruction::ScalarAddMemConst {
+            dst: 0x100,
+            lhs: 0x120,
+            rhs: U256::from(9),
+        });
+        let program = builder.encode();
+        let words = program.words();
+        assert_eq!(words.len(), 5);
+        let (opcode, len) = header_bytes(words[1]);
+        assert_eq!(opcode, OP_SCALAR_ADD_MEM_CONST);
+        assert_eq!(len, 4);
+    }
+
+    #[test]
+    fn scalar_mul_add_mem_mem_const_encoding() {
+        let mut builder = CompactProgramBuilder::new();
+        builder.push(CompactInstruction::ScalarMulAddMemMemConst {
+            dst: 0x100,
+            mul_lhs: 0x120,
+            mul_rhs: 0x140,
+            addend: U256::from(11),
+        });
+        let program = builder.encode();
+        let words = program.words();
+        assert_eq!(words.len(), 6);
+        let (opcode, len) = header_bytes(words[1]);
+        assert_eq!(opcode, OP_SCALAR_MUL_ADD_MEM_MEM_CONST);
+        assert_eq!(len, 5);
+    }
+
+    #[test]
+    fn calldata_point_compressed_encoding() {
+        let mut builder = CompactProgramBuilder::new();
+        builder.push(CompactInstruction::CalldataPointCompressed {
+            dst: 0x200,
+            offset: 0x40,
+            coord_bytes: 0x30,
+        });
+        let program = builder.encode();
+        let words = program.words();
+        assert_eq!(words.len(), 5);
+        let (opcode, len) = header_bytes(words[1]);
+        assert_eq!(opcode, OP_CALLDATA_POINT_COMPRESSED);
+        assert_eq!(len, 4);
+    }
+
+    #[test]
+    fn staticcall_sized_encoding() {
+        let mut builder = CompactProgramBuilder::new();
+        builder.push(CompactInstruction::StaticCallSized {
+            precompile: 0x0c,
+            cd_ptr: 0x200,
+            cd_len: 0x140,
+            rd_ptr: 0x300,
+            rd_len: 0x80,
+        });
+        let program = builder.encode();
+        let words = program.words();
+        assert_eq!(words.len(), 7);
+        let (opcode, len) = header_bytes(words[1]);
+        assert_eq!(opcode, OP_STATICCALL_SIZED);
+        assert_eq!(len, 6);
+    }
+
+    #[test]
+    fn scalar_mul_add_mem_const_mem_encoding() {
+        let mut builder = CompactProgramBuilder::new();
+        builder.push(CompactInstruction::ScalarMulAddMemConstMem {
+            dst: 0x100,
+            mul_lhs: 0x120,
+            mul_rhs_const: U256::from(17),
+            addend: 0x140,
+        });
+        let program = builder.encode();
+        let words = program.words();
+        assert_eq!(words.len(), 6);
+        let (opcode, len) = header_bytes(words[1]);
+        assert_eq!(opcode, OP_SCALAR_MUL_ADD_MEM_CONST_MEM);
+        assert_eq!(len, 5);
     }
 }

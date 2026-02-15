@@ -322,7 +322,8 @@ fn decode_compressed_point(encoded: &[u8]) -> Result<G1Projective> {
     }
 
     let rhs = x.square() * x + MidnightCurveB;
-    let mut y = Option::from(rhs.sqrt()).ok_or_else(|| anyhow!("compressed point has no square root"))?;
+    let mut y =
+        Option::from(rhs.sqrt()).ok_or_else(|| anyhow!("compressed point has no square root"))?;
     if fp_is_odd(&y) != y_is_odd {
         y = -y;
     }
