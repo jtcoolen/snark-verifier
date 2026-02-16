@@ -1,0 +1,49 @@
+{
+  "batch_index": 0,
+  "calldata_bytes": 9728,
+  "proof_bytes": 8544,
+  "unrolled": {
+    "deployment_code_bytes": 94502,
+    "initcode_limit_bytes": 49152,
+    "initcode_within_limit": false,
+    "revm": {
+      "call_gas": 1140697,
+      "deployment_gas": 20435866,
+      "error": null,
+      "status": "ok",
+      "total_gas": 21576563
+    },
+    "runtime_code_bytes": 94472,
+    "runtime_code_limit_bytes": 24576,
+    "runtime_code_within_limit": false
+  },
+  "unrolled_sharded": {
+    "all_shard_initcode_within_limit": true,
+    "all_shard_runtime_within_limit": true,
+    "dispatcher_initcode_bytes": 954,
+    "dispatcher_initcode_within_limit": true,
+    "dispatcher_runtime_code_bytes": 189,
+    "dispatcher_runtime_code_within_limit": true,
+    "revm": {
+      "call_gas": 1384626,
+      "deployment_gas": 20892177,
+      "dispatcher_deploy_gas": 220598,
+      "error": null,
+      "shard_deploy_gas": 20671579,
+      "status": "ok",
+      "total_gas": 22276803
+    },
+    "shard_initcode_sizes_bytes": [
+      24413,
+      24013,
+      24565,
+      22001
+    ],
+    "shard_runtime_sizes_bytes": [
+      24385,
+      23985,
+      24537,
+      21973
+    ]
+  }
+}

@@ -1,0 +1,59 @@
+[package]
+name = "shielded-pool"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+midnight-circuits = { path = "../midnight-zk/circuits" }
+midnight-curves = { path = "../midnight-zk/curves" }
+midnight-proofs = { path = "../midnight-zk/proofs" }
+midnight-zk-stdlib = { path = "../midnight-zk/zk_stdlib" }
+sha2 = "0.10.9"
+rand = "0.8"
+rand_chacha = "0.3"
+ff = "0.13.1"
+group = "0.13.0"
+rand_core = "0.9.3"
+halo2curves = "0.9.0"
+rustfmt = "0.10.0"
+rayon = "1.11.0"
+blake2b_simd = "1.0.3"
+sha3 = "0.10.8"
+thiserror = "2.0.18"
+proptest = "1.9.0"
+num-bigint = "0.4.6"
+hex = { version = "0.4.3", optional = true }
+serde_json = { version = "1.0.145", optional = true }
+revm = { version = "27.1.0", optional = true }
+snark-verifier-sdk = { path = "../snark-verifier-sdk", optional = true, default-features = false, features = ["midnight", "loader_evm", "revm", "truncated-challenges"] }
+
+[features]
+default = ["truncated-challenges"]
+dev-curves = [
+  "midnight-curves/dev-curves",
+  "midnight-proofs/dev-curves",
+  "midnight-circuits/dev-curves",
+]
+truncated-challenges = [
+  "midnight-proofs/truncated-challenges",
+  "midnight-circuits/truncated-challenges",
+]
+
+# only build aggregator when you explicitly ask for it
+aggregation = []
+evm-bench = ["dep:snark-verifier-sdk", "dep:serde_json", "dep:hex", "dep:revm"]
+
+[patch.crates-io]
+halo2curves-axiom = { git = "https://github.com/jtcoolen/halo2curves.git", rev = "edeb29e7964f1d24bb3bc0d2a5f9417de92a572a" }
+midnight-circuits = { path = "../midnight-zk/circuits" }
+midnight-curves = { path = "../midnight-zk/curves" }
+midnight-proofs = { path = "../midnight-zk/proofs" }
+midnight-zk-stdlib = { path = "../midnight-zk/zk_stdlib" }
+
+[patch."https://github.com/axiom-crypto/halo2-lib.git"]
+halo2-ecc  = { git = "https://github.com/jtcoolen/halo2-lib.git", rev = "f56347dbc1162d11ba1a52eb2e5501f93445a75d" }
+
+[patch."https://github.com/jtcoolen/halo2-lib.git"]
+halo2-base = { path = "../vendor/halo2-base" }
+
+[workspace]

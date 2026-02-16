@@ -1,0 +1,9 @@
+runtime_code_size_limit_bytes: 24576
+initcode_size_limit_bytes: 49152
+total_statements: 4520
+shard_statement_start_indices: [0, 1152, 2304, 3328]
+shard_statement_end_indices: [1152, 2304, 3328, 4520]
+dispatcher_runtime_code_bytes: 189
+dispatcher_deployment_code_bytes: 954
+shard_runtime_code_bytes: [24345, 23974, 23527, 23211]
+shard_deployment_code_bytes: [24373, 24002, 23555, 23239]

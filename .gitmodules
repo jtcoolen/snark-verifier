@@ -1,11 +1,3 @@
-[submodule "shielded_pool"]
-	path = shielded_pool
-	url = https://github.com/jtcoolen/shielded_pool.git
-
-[submodule "midnight-zk"]
-	path = midnight-zk
-	url = https://github.com/midnightntwrk/midnight-zk.git
-
 [submodule "cardhalo"]
 	path = cardhalo
 	url = https://github.com/rrtoledo/cardhalo.git
