@@ -1,6 +1,10 @@
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "evm-bench")]
+use std::cell::RefCell;
+#[cfg(feature = "evm-bench")]
+use std::collections::BTreeSet;
+#[cfg(feature = "evm-bench")]
 use std::path::PathBuf;
 
 use ff::{Field, PrimeField};
@@ -36,7 +40,7 @@ use revm::{
     context_interface::result::{ExecutionResult, Output},
     database::InMemoryDB,
     primitives::{hardfork::SpecId, Address, Bytes, TxKind},
-    Context, ExecuteCommitEvm, MainBuilder, MainContext,
+    Context, ExecuteCommitEvm, MainBuilder, MainContext, MainnetEvm,
 };
 #[cfg(feature = "evm-bench")]
 use serde_json::json;
@@ -98,6 +102,15 @@ const PROOF_PUBLIC_INPUTS: usize =
     STATE_TRANSITION_PUBLIC_INPUTS + L2_METADATA_MERKLE_PUBLIC_INPUTS + FINAL_ACC_PUBLIC_INPUTS;
 #[cfg(feature = "evm-bench")]
 const L2_METADATA_WIDTH: usize = 7;
+#[cfg(feature = "evm-bench")]
+type RevmMainnetContext = revm::context::Context<
+    revm::context::BlockEnv,
+    revm::context::TxEnv,
+    revm::context::CfgEnv,
+    InMemoryDB,
+    revm::Journal<InMemoryDB>,
+    (),
+>;
 
 #[derive(Debug, Error)]
 enum AppError {
@@ -164,6 +177,26 @@ struct RollupTransitionBenchSample {
     transition_idx: usize,
     proof: Vec<u8>,
     public_inputs: Vec<F>,
+}
+
+#[cfg(feature = "evm-bench")]
+struct FinalWrapStatefulLoopCache {
+    evm: MainnetEvm<RevmMainnetContext>,
+    dispatcher_address: Address,
+    state_contract_address: Address,
+    shard_deploy_gas: u64,
+    dispatcher_deploy_gas: u64,
+    verifier_deploy_gas_total: u64,
+    direct_verifier_call_gas: Option<u64>,
+    state_contract_deploy_gas: u64,
+    call_gas_total: u64,
+    call_gas_per_batch: Vec<serde_json::Value>,
+    processed_batch_ids: BTreeSet<usize>,
+}
+
+#[cfg(feature = "evm-bench")]
+thread_local! {
+    static FINAL_WRAP_STATEFUL_LOOP_CACHE: RefCell<Option<FinalWrapStatefulLoopCache>> = RefCell::new(None);
 }
 
 #[cfg(feature = "evm-bench")]
@@ -1104,11 +1137,17 @@ contract ShieldedPoolStatefulVerifier {{
     event ValidationApplied(
         string message,
         uint256 indexed l2BlockNumber,
+        uint256 blkPre,
+        uint256 blkPost,
         uint256 commitmentRoot,
         uint256 nullifierRoot,
         uint256 rootsSetRoot,
         uint256 subroot,
-        uint256 metadataMerkleHash
+        uint256 metadataMerkleHash,
+        uint256 stateHashPre,
+        uint256 stateHashPost,
+        uint256 blockHashPre,
+        uint256 blockHashPost
     );
 
     constructor(
@@ -1123,6 +1162,23 @@ contract ShieldedPoolStatefulVerifier {{
         nullifierRoot = _nullifierRoot;
         rootsSetRoot = _rootsSetRoot;
         blockHead = _blockHead;
+    }}
+
+    function _stateHash(
+        uint256 cRoot,
+        uint256 nRoot,
+        uint256 rootsRoot,
+        uint256 blk
+    ) private pure returns (uint256) {{
+        return uint256(keccak256(abi.encodePacked(cRoot, nRoot, rootsRoot, blk)));
+    }}
+
+    function _blockHash(
+        uint256 blk,
+        uint256 subroot,
+        uint256 metadataMerkleHash
+    ) private pure returns (uint256) {{
+        return uint256(keccak256(abi.encodePacked(blk, subroot, metadataMerkleHash)));
     }}
 
     function _checkLimbRange(uint256 limb, uint256 idx) private pure {{
@@ -1393,6 +1449,18 @@ contract ShieldedPoolStatefulVerifier {{
         if (blkPre != blockHead) revert InvalidTransition(4);
         if (blkPost != blkPre + 1) revert InvalidTransition(5);
 
+        uint256 stateHashPre = _stateHash(
+            commitmentRoot,
+            nullifierRoot,
+            rootsSetRoot,
+            blockHead
+        );
+        uint256 blockHashPre = _blockHash(
+            blockHead,
+            lastSubroot,
+            lastL2MetadataMerkleHash
+        );
+
         uint256 metadataMerkleHash = _computeL2MetadataMerkleHash(l2BlockMetadata);
         if (verifierCalldata.length < L2_METADATA_MERKLE_PI_OFFSET + 0x20) revert InvalidTransition(8);
 
@@ -1416,6 +1484,9 @@ contract ShieldedPoolStatefulVerifier {{
         if (!pairingCallOk) revert InvalidAccumulatorPairingResult(pairingResult);
         if (pairingResult != 1) revert InvalidAccumulatorPairingResult(pairingResult);
 
+        uint256 stateHashPost = _stateHash(cPost, nPost, postRootsSetRoot, blkPost);
+        uint256 blockHashPost = _blockHash(blkPost, subroot, metadataMerkleHash);
+
         commitmentRoot = cPost;
         nullifierRoot = nPost;
         rootsSetRoot = postRootsSetRoot;
@@ -1425,11 +1496,17 @@ contract ShieldedPoolStatefulVerifier {{
         emit ValidationApplied(
             "Validation successful",
             blkPost,
+            blkPre,
+            blkPost,
             cPost,
             nPost,
             postRootsSetRoot,
             subroot,
-            metadataMerkleHash
+            metadataMerkleHash,
+            stateHashPre,
+            stateHashPost,
+            blockHashPre,
+            blockHashPost
         );
         return true;
     }}
@@ -1545,234 +1622,276 @@ contract ShieldedPoolStatefulVerifier {{
         println!(
             "=== REVM stateful-loop benchmarks (single deployment, multi-batch verify/update) ==="
         );
-        let mut evm = Context::mainnet()
-            .modify_cfg_chained(|cfg| {
-                cfg.spec = SpecId::PRAGUE;
-                cfg.limit_contract_code_size = Some(usize::MAX);
-                cfg.limit_contract_initcode_size = Some(usize::MAX);
-                cfg.disable_nonce_check = true;
-                cfg.tx_gas_limit_cap = Some(BENCH_GAS_LIMIT);
-            })
-            .with_db(InMemoryDB::default())
-            .build_mainnet();
+        FINAL_WRAP_STATEFUL_LOOP_CACHE.with(|cache_cell| -> Result<(), AppError> {
+            let mut cache_opt = cache_cell.borrow_mut();
 
-        let mut shard_addresses = Vec::with_capacity(unrolled_sharded.shard_deployment_codes.len());
-        let mut shard_deploy_gas = 0u64;
-        for (idx, deployment_code) in unrolled_sharded.shard_deployment_codes.iter().enumerate() {
-            let deployment_tx = TxEnv::builder()
-                .gas_limit(BENCH_GAS_LIMIT)
-                .kind(TxKind::Create)
-                .data(Bytes::from(deployment_code.clone()))
-                .build_fill();
-            let deploy_result = evm.transact_commit(deployment_tx).map_err(|err| {
-                AppError::EvmBench(format!("revm shard deployment error for shard {idx}: {err}"))
-            })?;
-            let (address, gas_used) = match deploy_result {
-                ExecutionResult::Success {
-                    gas_used,
-                    output: Output::Create(_, Some(contract)),
-                    ..
-                } => (contract, gas_used),
-                ExecutionResult::Revert { gas_used, output } => {
-                    return Err(AppError::EvmBench(format!(
-                        "shard deployment reverted at shard {idx} with gas_used {gas_used}; output={}",
-                        decode_revert_data(&output)
-                    )));
+            if cache_opt.is_none() {
+                let mut evm = Context::mainnet()
+                    .modify_cfg_chained(|cfg| {
+                        cfg.spec = SpecId::PRAGUE;
+                        cfg.limit_contract_code_size = Some(usize::MAX);
+                        cfg.limit_contract_initcode_size = Some(usize::MAX);
+                        cfg.disable_nonce_check = true;
+                        cfg.tx_gas_limit_cap = Some(BENCH_GAS_LIMIT);
+                    })
+                    .with_db(InMemoryDB::default())
+                    .build_mainnet();
+
+                let mut shard_addresses =
+                    Vec::with_capacity(unrolled_sharded.shard_deployment_codes.len());
+                let mut shard_deploy_gas = 0u64;
+                for (idx, deployment_code) in unrolled_sharded.shard_deployment_codes.iter().enumerate() {
+                    let deployment_tx = TxEnv::builder()
+                        .gas_limit(BENCH_GAS_LIMIT)
+                        .kind(TxKind::Create)
+                        .data(Bytes::from(deployment_code.clone()))
+                        .build_fill();
+                    let deploy_result = evm.transact_commit(deployment_tx).map_err(|err| {
+                        AppError::EvmBench(format!(
+                            "revm shard deployment error for shard {idx}: {err}"
+                        ))
+                    })?;
+                    let (address, gas_used) = match deploy_result {
+                        ExecutionResult::Success {
+                            gas_used,
+                            output: Output::Create(_, Some(contract)),
+                            ..
+                        } => (contract, gas_used),
+                        ExecutionResult::Revert { gas_used, output } => {
+                            return Err(AppError::EvmBench(format!(
+                                "shard deployment reverted at shard {idx} with gas_used {gas_used}; output={}",
+                                decode_revert_data(&output)
+                            )));
+                        }
+                        ExecutionResult::Halt { reason, gas_used } => {
+                            return Err(AppError::EvmBench(format!(
+                                "shard deployment halted at shard {idx} with gas_used {gas_used}; reason={reason:?}"
+                            )));
+                        }
+                        ExecutionResult::Success { output, .. } => {
+                            return Err(AppError::EvmBench(format!(
+                                "shard deployment returned unexpected output at shard {idx}: {output:?}"
+                            )));
+                        }
+                    };
+                    shard_addresses.push(address);
+                    shard_deploy_gas = shard_deploy_gas.saturating_add(gas_used);
                 }
-                ExecutionResult::Halt { reason, gas_used } => {
-                    return Err(AppError::EvmBench(format!(
-                        "shard deployment halted at shard {idx} with gas_used {gas_used}; reason={reason:?}"
-                    )));
+
+                let mut dispatcher_deployment = unrolled_sharded.dispatcher_deployment_code.clone();
+                dispatcher_deployment
+                    .extend_from_slice(&encode_sharded_constructor_args(&shard_addresses));
+                let dispatcher_deploy_tx = TxEnv::builder()
+                    .gas_limit(BENCH_GAS_LIMIT)
+                    .kind(TxKind::Create)
+                    .data(Bytes::from(dispatcher_deployment))
+                    .build_fill();
+                let dispatcher_deploy_result =
+                    evm.transact_commit(dispatcher_deploy_tx).map_err(|err| {
+                        AppError::EvmBench(format!(
+                            "revm sharded dispatcher deployment error: {err}"
+                        ))
+                    })?;
+                let (dispatcher_address, dispatcher_deploy_gas) = match dispatcher_deploy_result {
+                    ExecutionResult::Success {
+                        gas_used,
+                        output: Output::Create(_, Some(contract)),
+                        ..
+                    } => (contract, gas_used),
+                    ExecutionResult::Revert { gas_used, output } => {
+                        return Err(AppError::EvmBench(format!(
+                            "dispatcher deployment reverted with gas_used {gas_used}; output={}",
+                            decode_revert_data(&output)
+                        )));
+                    }
+                    ExecutionResult::Halt { reason, gas_used } => {
+                        return Err(AppError::EvmBench(format!(
+                            "dispatcher deployment halted with gas_used {gas_used}; reason={reason:?}"
+                        )));
+                    }
+                    ExecutionResult::Success { output, .. } => {
+                        return Err(AppError::EvmBench(format!(
+                            "dispatcher deployment returned unexpected output: {output:?}"
+                        )));
+                    }
+                };
+                let verifier_deploy_gas_total =
+                    shard_deploy_gas.saturating_add(dispatcher_deploy_gas);
+
+                let mut stateful_deployment = stateful_deployment_base.clone();
+                stateful_deployment.extend_from_slice(&encode_state_constructor_args(
+                    dispatcher_address,
+                    &samples[0].public_inputs,
+                )?);
+                let state_deploy_tx = TxEnv::builder()
+                    .gas_limit(BENCH_GAS_LIMIT)
+                    .kind(TxKind::Create)
+                    .data(Bytes::from(stateful_deployment))
+                    .build_fill();
+                let state_deploy_result = evm.transact_commit(state_deploy_tx).map_err(|err| {
+                    AppError::EvmBench(format!("revm stateful contract deployment error: {err}"))
+                })?;
+                let (state_contract_address, state_contract_deploy_gas) = match state_deploy_result {
+                    ExecutionResult::Success {
+                        gas_used,
+                        output: Output::Create(_, Some(contract)),
+                        ..
+                    } => (contract, gas_used),
+                    ExecutionResult::Revert { gas_used, output } => {
+                        return Err(AppError::EvmBench(format!(
+                            "stateful contract deployment reverted with gas_used {gas_used}; output={}",
+                            decode_revert_data(&output)
+                        )));
+                    }
+                    ExecutionResult::Halt { reason, gas_used } => {
+                        return Err(AppError::EvmBench(format!(
+                            "stateful contract deployment halted with gas_used {gas_used}; reason={reason:?}"
+                        )));
+                    }
+                    ExecutionResult::Success { output, .. } => {
+                        return Err(AppError::EvmBench(format!(
+                            "stateful contract deployment returned unexpected output: {output:?}"
+                        )));
+                    }
+                };
+
+                println!(
+                    "revm stateful-loop unrolled-sharded verifier deploy gas: shards={} dispatcher={} total={}",
+                    shard_deploy_gas,
+                    dispatcher_deploy_gas,
+                    verifier_deploy_gas_total
+                );
+                println!(
+                    "revm stateful-loop state-contract deploy gas: {state_contract_deploy_gas}"
+                );
+
+                *cache_opt = Some(FinalWrapStatefulLoopCache {
+                    evm,
+                    dispatcher_address,
+                    state_contract_address,
+                    shard_deploy_gas,
+                    dispatcher_deploy_gas,
+                    verifier_deploy_gas_total,
+                    direct_verifier_call_gas: None,
+                    state_contract_deploy_gas,
+                    call_gas_total: 0,
+                    call_gas_per_batch: Vec::new(),
+                    processed_batch_ids: BTreeSet::new(),
+                });
+            }
+
+            let cache = cache_opt.as_mut().expect("stateful cache must be initialized");
+            for ((batch_idx_ref, verifier_calldata), sample) in verifier_calldatas.iter().zip(samples) {
+                let batch_idx = *batch_idx_ref;
+                if cache.processed_batch_ids.contains(&batch_idx) {
+                    continue;
                 }
-                ExecutionResult::Success { output, .. } => {
-                    return Err(AppError::EvmBench(format!(
-                        "shard deployment returned unexpected output at shard {idx}: {output:?}"
-                    )));
-                }
-            };
-            shard_addresses.push(address);
-            shard_deploy_gas = shard_deploy_gas.saturating_add(gas_used);
-        }
 
-        let mut dispatcher_deployment = unrolled_sharded.dispatcher_deployment_code.clone();
-        dispatcher_deployment.extend_from_slice(&encode_sharded_constructor_args(&shard_addresses));
-        let dispatcher_deploy_tx = TxEnv::builder()
-            .gas_limit(BENCH_GAS_LIMIT)
-            .kind(TxKind::Create)
-            .data(Bytes::from(dispatcher_deployment))
-            .build_fill();
-        let dispatcher_deploy_result = evm.transact_commit(dispatcher_deploy_tx).map_err(|err| {
-            AppError::EvmBench(format!("revm sharded dispatcher deployment error: {err}"))
-        })?;
-        let (dispatcher_address, dispatcher_deploy_gas) = match dispatcher_deploy_result {
-            ExecutionResult::Success {
-                gas_used,
-                output: Output::Create(_, Some(contract)),
-                ..
-            } => (contract, gas_used),
-            ExecutionResult::Revert { gas_used, output } => {
-                return Err(AppError::EvmBench(format!(
-                    "dispatcher deployment reverted with gas_used {gas_used}; output={}",
-                    decode_revert_data(&output)
-                )));
-            }
-            ExecutionResult::Halt { reason, gas_used } => {
-                return Err(AppError::EvmBench(format!(
-                    "dispatcher deployment halted with gas_used {gas_used}; reason={reason:?}"
-                )));
-            }
-            ExecutionResult::Success { output, .. } => {
-                return Err(AppError::EvmBench(format!(
-                    "dispatcher deployment returned unexpected output: {output:?}"
-                )));
-            }
-        };
-        let verifier_deploy_gas_total = shard_deploy_gas.saturating_add(dispatcher_deploy_gas);
-
-        let mut stateful_deployment = stateful_deployment_base.clone();
-        stateful_deployment.extend_from_slice(&encode_state_constructor_args(
-            dispatcher_address,
-            &samples[0].public_inputs,
-        )?);
-        let state_deploy_tx = TxEnv::builder()
-            .gas_limit(BENCH_GAS_LIMIT)
-            .kind(TxKind::Create)
-            .data(Bytes::from(stateful_deployment))
-            .build_fill();
-        let state_deploy_result = evm.transact_commit(state_deploy_tx).map_err(|err| {
-            AppError::EvmBench(format!("revm stateful contract deployment error: {err}"))
-        })?;
-        let (state_contract_address, state_contract_deploy_gas) = match state_deploy_result {
-            ExecutionResult::Success {
-                gas_used,
-                output: Output::Create(_, Some(contract)),
-                ..
-            } => (contract, gas_used),
-            ExecutionResult::Revert { gas_used, output } => {
-                return Err(AppError::EvmBench(format!(
-                    "stateful contract deployment reverted with gas_used {gas_used}; output={}",
-                    decode_revert_data(&output)
-                )));
-            }
-            ExecutionResult::Halt { reason, gas_used } => {
-                return Err(AppError::EvmBench(format!(
-                    "stateful contract deployment halted with gas_used {gas_used}; reason={reason:?}"
-                )));
-            }
-            ExecutionResult::Success { output, .. } => {
-                return Err(AppError::EvmBench(format!(
-                    "stateful contract deployment returned unexpected output: {output:?}"
-                )));
-            }
-        };
-
-        println!(
-            "revm stateful-loop unrolled-sharded verifier deploy gas: shards={} dispatcher={} total={}",
-            shard_deploy_gas,
-            dispatcher_deploy_gas,
-            verifier_deploy_gas_total
-        );
-
-        let direct_verifier_call_gas = if let Some((batch_idx, verifier_calldata)) =
-            verifier_calldatas.first()
-        {
-            let direct_call_tx = TxEnv::builder()
-                .gas_limit(BENCH_GAS_LIMIT)
-                .kind(TxKind::Call(dispatcher_address))
-                .data(Bytes::from(verifier_calldata.clone()))
-                .build_fill();
-            let direct_result = evm.transact_commit(direct_call_tx).map_err(|err| {
-                AppError::EvmBench(format!(
-                    "revm direct verifier call error on batch {batch_idx}: {err}"
-                ))
-            })?;
-            match direct_result {
-                ExecutionResult::Success { gas_used, .. } => {
+                if cache.direct_verifier_call_gas.is_none() {
+                    let direct_call_tx = TxEnv::builder()
+                        .gas_limit(BENCH_GAS_LIMIT)
+                        .kind(TxKind::Call(cache.dispatcher_address))
+                        .data(Bytes::from(verifier_calldata.clone()))
+                        .build_fill();
+                    let direct_result = cache.evm.transact_commit(direct_call_tx).map_err(|err| {
+                        AppError::EvmBench(format!(
+                            "revm direct verifier call error on batch {batch_idx}: {err}"
+                        ))
+                    })?;
+                    let gas_used = match direct_result {
+                        ExecutionResult::Success { gas_used, .. } => gas_used,
+                        ExecutionResult::Revert { gas_used, output } => {
+                            return Err(AppError::EvmBench(format!(
+                                "direct verifier call reverted on batch {batch_idx} with gas_used {gas_used}; output={}",
+                                decode_revert_data(&output)
+                            )));
+                        }
+                        ExecutionResult::Halt { reason, gas_used } => {
+                            return Err(AppError::EvmBench(format!(
+                                "direct verifier call halted on batch {batch_idx} with gas_used {gas_used}; reason={reason:?}"
+                            )));
+                        }
+                    };
                     println!(
                         "revm stateful-loop direct verifier batch {batch_idx} gas: {gas_used}"
                     );
-                    Some(gas_used)
+                    cache.direct_verifier_call_gas = Some(gas_used);
                 }
-                ExecutionResult::Revert { gas_used, output } => {
-                    return Err(AppError::EvmBench(format!(
-                        "direct verifier call reverted on batch {batch_idx} with gas_used {gas_used}; output={}",
-                        decode_revert_data(&output)
-                    )));
-                }
-                ExecutionResult::Halt { reason, gas_used } => {
-                    return Err(AppError::EvmBench(format!(
-                        "direct verifier call halted on batch {batch_idx} with gas_used {gas_used}; reason={reason:?}"
-                    )));
+
+                let state_call_data = encode_verify_and_update_call(
+                    verifier_calldata,
+                    &sample.public_inputs,
+                    &sample.l2_block_metadata,
+                )?;
+                let state_call_data_path =
+                    out_dir.join(format!("batch_{batch_idx}_stateful_verifyAndUpdate.calldata"));
+                std::fs::write(&state_call_data_path, hex::encode(&state_call_data))
+                    .map_err(|e| AppError::EvmBench(err_string(e)))?;
+                let call_tx = TxEnv::builder()
+                    .gas_limit(BENCH_GAS_LIMIT)
+                    .kind(TxKind::Call(cache.state_contract_address))
+                    .data(Bytes::from(state_call_data))
+                    .build_fill();
+
+                let result = cache.evm.transact_commit(call_tx).map_err(|err| {
+                    AppError::EvmBench(format!("revm stateful loop call error: {err}"))
+                })?;
+                match result {
+                    ExecutionResult::Success { gas_used, .. } => {
+                        cache.call_gas_total = cache.call_gas_total.saturating_add(gas_used);
+                        println!("revm stateful-loop batch {batch_idx} verify+update gas: {gas_used}");
+                        cache.call_gas_per_batch.push(json!({
+                            "batch_index": batch_idx,
+                            "call_gas": gas_used,
+                        }));
+                        cache.processed_batch_ids.insert(batch_idx);
+                    }
+                    ExecutionResult::Revert { gas_used, output } => {
+                        return Err(AppError::EvmBench(format!(
+                            "stateful loop call reverted on batch {batch_idx} with gas_used {gas_used}; output={}",
+                            decode_revert_data(&output)
+                        )));
+                    }
+                    ExecutionResult::Halt { reason, gas_used } => {
+                        return Err(AppError::EvmBench(format!(
+                            "stateful loop call halted on batch {batch_idx} with gas_used {gas_used}; reason={reason:?}"
+                        )));
+                    }
                 }
             }
-        } else {
-            None
-        };
-        println!("revm stateful-loop state-contract deploy gas: {state_contract_deploy_gas}");
 
-        let mut call_gas_total = 0u64;
-        let mut call_gas_per_batch = Vec::with_capacity(samples.len());
-
-        for ((batch_idx, verifier_calldata), sample) in verifier_calldatas.iter().zip(samples) {
-            let state_call_data = encode_verify_and_update_call(
-                verifier_calldata,
-                &sample.public_inputs,
-                &sample.l2_block_metadata,
-            )?;
-            let state_call_data_path =
-                out_dir.join(format!("batch_{batch_idx}_stateful_verifyAndUpdate.calldata"));
-            std::fs::write(&state_call_data_path, hex::encode(&state_call_data))
-                .map_err(|e| AppError::EvmBench(err_string(e)))?;
-            let call_tx = TxEnv::builder()
-                .gas_limit(BENCH_GAS_LIMIT)
-                .kind(TxKind::Call(state_contract_address))
-                .data(Bytes::from(state_call_data))
-                .build_fill();
-
-            let result = evm.transact_commit(call_tx).map_err(|err| {
-                AppError::EvmBench(format!("revm stateful loop call error: {err}"))
-            })?;
-            match result {
-                ExecutionResult::Success { gas_used, .. } => {
-                    call_gas_total = call_gas_total.saturating_add(gas_used);
-                    println!("revm stateful-loop batch {batch_idx} verify+update gas: {gas_used}");
-                    call_gas_per_batch.push(json!({
-                        "batch_index": batch_idx,
-                        "call_gas": gas_used,
-                    }));
-                }
-                ExecutionResult::Revert { gas_used, output } => {
-                    return Err(AppError::EvmBench(format!(
-                        "stateful loop call reverted on batch {batch_idx} with gas_used {gas_used}; output={}",
-                        decode_revert_data(&output)
-                    )));
-                }
-                ExecutionResult::Halt { reason, gas_used } => {
-                    return Err(AppError::EvmBench(format!(
-                        "stateful loop call halted on batch {batch_idx} with gas_used {gas_used}; reason={reason:?}"
-                    )));
-                }
-            }
-        }
-
-        println!("revm stateful-loop total call gas: {call_gas_total}");
-        stateful_revm = json!({
-            "status": "ok",
-            "verifier_mode": "unrolled_sharded",
-            "shard_deploy_gas": shard_deploy_gas,
-            "dispatcher_deploy_gas": dispatcher_deploy_gas,
-            "verifier_deploy_gas_total": verifier_deploy_gas_total,
-            "direct_verifier_call_gas": direct_verifier_call_gas,
-            "state_contract_deploy_gas": state_contract_deploy_gas,
-            "call_gas_total": call_gas_total,
-            "call_gas_per_batch": call_gas_per_batch,
-            "error": null,
-        });
+            println!("revm stateful-loop total call gas: {}", cache.call_gas_total);
+            stateful_revm = json!({
+                "status": "ok",
+                "verifier_mode": "unrolled_sharded",
+                "shard_deploy_gas": cache.shard_deploy_gas,
+                "dispatcher_deploy_gas": cache.dispatcher_deploy_gas,
+                "verifier_deploy_gas_total": cache.verifier_deploy_gas_total,
+                "direct_verifier_call_gas": cache.direct_verifier_call_gas,
+                "state_contract_deploy_gas": cache.state_contract_deploy_gas,
+                "call_gas_total": cache.call_gas_total,
+                "call_gas_per_batch": cache.call_gas_per_batch.clone(),
+                "error": null,
+            });
+            Ok(())
+        })?;
     } else {
         println!(
             "RUN_REVM is not enabled; skipping stateful-loop revm benchmarks. Set RUN_REVM=1 to enable."
         );
     }
+
+    let processed_batches = if env_flag("RUN_REVM") {
+        FINAL_WRAP_STATEFUL_LOOP_CACHE.with(|cache_cell| {
+            cache_cell
+                .borrow()
+                .as_ref()
+                .map(|cache| cache.processed_batch_ids.len())
+                .unwrap_or(0)
+        })
+    } else {
+        samples.len()
+    };
 
     let stateful_manifest = format!(
         "dispatcher_runtime_code_bytes: {}\ndispatcher_deployment_code_bytes: {}\nshard_runtime_code_bytes: {:?}\nshard_deployment_code_bytes: {:?}\nstateful_runtime_code_bytes: {}\nstateful_deployment_code_bytes: {}\nnum_shards: {}\nnum_batches: {}\n",
@@ -1783,13 +1902,13 @@ contract ShieldedPoolStatefulVerifier {{
         stateful_runtime.len(),
         stateful_deployment_base.len(),
         unrolled_sharded.shard_deployment_codes.len(),
-        samples.len(),
+        processed_batches,
     );
     std::fs::write(&stateful_manifest_path, stateful_manifest)
         .map_err(|e| AppError::EvmBench(err_string(e)))?;
 
     let summary = json!({
-        "num_batches": samples.len(),
+        "num_batches": processed_batches,
         "unrolled_sharded_verifier": {
             "dispatcher_runtime_code_bytes": dispatcher_runtime_bytes,
             "dispatcher_initcode_bytes": dispatcher_initcode_bytes,
@@ -2484,6 +2603,13 @@ fn run() -> Result<(), AppError> {
     let skip_replay_demo = env_flag("SHIELDED_POOL_SKIP_REPLAY_DEMO") || run_evm_bench;
 
     #[cfg(feature = "evm-bench")]
+    if run_final_wrap_bench && live_stateful_loop {
+        FINAL_WRAP_STATEFUL_LOOP_CACHE.with(|cache| {
+            *cache.borrow_mut() = None;
+        });
+    }
+
+    #[cfg(feature = "evm-bench")]
     if run_evm_bench {
         let target_batch_label =
             target_batch.map(|batch| batch.to_string()).unwrap_or_else(|| "all".to_string());
@@ -2885,12 +3011,22 @@ fn run() -> Result<(), AppError> {
             #[cfg(feature = "evm-bench")]
             {
                 if run_evm_bench {
-                    evm_bench_samples.push(FinalWrapBenchSample {
+                    let sample = FinalWrapBenchSample {
                         batch_idx,
                         proof: final_proof_bytes.clone(),
                         public_inputs: final_public_inputs.clone(),
                         l2_block_metadata: l2_block_metadata.clone(),
-                    });
+                    };
+                    evm_bench_samples.push(sample.clone());
+
+                    if run_final_wrap_bench && live_stateful_loop {
+                        emit_final_wrap_evm_stateful_loop_bench(
+                            final_agg_srs.verifier_params(),
+                            final_vk.clone(),
+                            final_agg_srs.s_g2().into(),
+                            std::slice::from_ref(&sample),
+                        )?;
+                    }
                 }
             }
 
@@ -2932,18 +3068,6 @@ fn run() -> Result<(), AppError> {
             batch_idx,
             chain.commitment_map.succinct_repr()
         );
-
-        #[cfg(feature = "evm-bench")]
-        {
-            if run_final_wrap_bench && live_stateful_loop {
-                emit_final_wrap_evm_stateful_loop_bench(
-                    final_agg_srs.verifier_params(),
-                    final_vk.clone(),
-                    final_agg_srs.s_g2().into(),
-                    &evm_bench_samples,
-                )?;
-            }
-        }
 
         // Demonstrate replay protection using the POST state.
         if !skip_replay_demo {
