@@ -78,7 +78,7 @@ pub type IdPoint = AssignedForeignPoint<
 
 type CommitmentMap = MapMt<F, PoseidonChip<F>>;
 
-const DEFAULT_BATCH_SIZE: usize = 512;
+const DEFAULT_BATCH_SIZE: usize = 4;
 const DEFAULT_ROLLUP_TRANSITIONS: usize = 100;
 
 /// Probability that a client proof is generated against an older confirmed root.
@@ -100,8 +100,6 @@ const FINAL_ACC_PUBLIC_INPUTS_OFFSET: usize =
 #[cfg(feature = "evm-bench")]
 const PROOF_PUBLIC_INPUTS: usize =
     STATE_TRANSITION_PUBLIC_INPUTS + L2_METADATA_MERKLE_PUBLIC_INPUTS + FINAL_ACC_PUBLIC_INPUTS;
-#[cfg(feature = "evm-bench")]
-const L2_METADATA_WIDTH: usize = 7;
 #[cfg(feature = "evm-bench")]
 type RevmMainnetContext = revm::context::Context<
     revm::context::BlockEnv,
@@ -167,7 +165,6 @@ struct FinalWrapBenchSample {
     batch_idx: usize,
     proof: Vec<u8>,
     public_inputs: Vec<F>,
-    l2_block_metadata: Vec<F>,
 }
 
 #[cfg(feature = "evm-bench")]
@@ -395,7 +392,6 @@ fn encode_sharded_constructor_args(shard_addresses: &[Address]) -> Vec<u8> {
 fn encode_verify_and_update_call(
     verifier_calldata: &[u8],
     public_inputs: &[F],
-    l2_block_metadata: &[F],
 ) -> Result<Vec<u8>, AppError> {
     if public_inputs.len() < PROOF_PUBLIC_INPUTS {
         return Err(AppError::EvmBench(format!(
@@ -404,30 +400,20 @@ fn encode_verify_and_update_call(
             public_inputs.len(),
         )));
     }
-    if l2_block_metadata.is_empty() || l2_block_metadata.len() % L2_METADATA_WIDTH != 0 {
-        return Err(AppError::EvmBench(format!(
-            "invalid L2 metadata length: got {}, expected non-zero multiple of {}",
-            l2_block_metadata.len(),
-            L2_METADATA_WIDTH
-        )));
-    }
 
     let selector = {
         let digest = Keccak256::digest(
-            b"verifyAndUpdate(bytes,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256[28],uint256[])",
+            b"verifyAndUpdate(bytes,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256[28])",
         );
         [digest[0], digest[1], digest[2], digest[3]]
     };
 
-    // Head: bytes offset + 9 state-transition words + fixed uint256[28] accumulator limbs + metadata offset.
-    let head_words = 1 + STATE_TRANSITION_PUBLIC_INPUTS + FINAL_ACC_PUBLIC_INPUTS + 1;
+    // Head: bytes offset + 9 state-transition words + fixed uint256[28] accumulator limbs.
+    let head_words = 1 + STATE_TRANSITION_PUBLIC_INPUTS + FINAL_ACC_PUBLIC_INPUTS;
     let bytes_offset = head_words * 32;
     let verifier_tail_size = 32 + ((verifier_calldata.len() + 31) / 32) * 32;
-    let metadata_offset = bytes_offset + verifier_tail_size;
 
-    let mut encoded = Vec::with_capacity(
-        4 + bytes_offset + verifier_tail_size + 32 + l2_block_metadata.len() * 32,
-    );
+    let mut encoded = Vec::with_capacity(4 + bytes_offset + verifier_tail_size);
     encoded.extend_from_slice(&selector);
     encoded.extend_from_slice(&abi_word_from_usize(bytes_offset));
     for value in &public_inputs[..STATE_TRANSITION_PUBLIC_INPUTS] {
@@ -438,16 +424,11 @@ fn encode_verify_and_update_call(
     {
         encoded.extend_from_slice(&field_to_abi_word(*value));
     }
-    encoded.extend_from_slice(&abi_word_from_usize(metadata_offset));
 
     encoded.extend_from_slice(&abi_word_from_usize(verifier_calldata.len()));
     encoded.extend_from_slice(verifier_calldata);
     let padding = (32 - (verifier_calldata.len() % 32)) % 32;
     encoded.extend(std::iter::repeat_n(0u8, padding));
-    encoded.extend_from_slice(&abi_word_from_usize(l2_block_metadata.len()));
-    for value in l2_block_metadata {
-        encoded.extend_from_slice(&field_to_abi_word(*value));
-    }
     Ok(encoded)
 }
 
@@ -1094,11 +1075,6 @@ fn emit_final_wrap_evm_stateful_loop_bench(
         .map(|idx| format!("        pairingInput[{}] = PAIRING_MINUS_TAU_{idx};", 16 + idx))
         .collect::<Vec<_>>()
         .join("\n");
-    let scalar_modulus =
-        BigUint::from_bytes_le((-F::ONE).to_repr().as_ref()) + BigUint::from(1u8);
-    let scalar_modulus_hex = format!("0x{:x}", scalar_modulus);
-    let l2_metadata_merkle_pi_offset_hex = format!("0x{:x}", 9 * 0x20);
-
     let stateful_solidity = format!(
         r#"
 // SPDX-License-Identifier: MIT
@@ -1116,10 +1092,6 @@ contract ShieldedPoolStatefulVerifier {{
     uint256 internal constant LIMB_BITS = 56;
     uint256 internal constant LIMB_MASK = (1 << LIMB_BITS) - 1;
     uint256 internal constant LIMB4_LOW_MASK = (1 << 32) - 1;
-    uint256 internal constant SCALAR_MODULUS = {scalar_modulus_hex};
-    uint256 internal constant L2_METADATA_WIDTH = 7;
-    uint256 internal constant L2_METADATA_MERKLE_PI_INDEX = 9;
-    uint256 internal constant L2_METADATA_MERKLE_PI_OFFSET = L2_METADATA_MERKLE_PI_INDEX * 0x20;
     uint256 internal constant G1MSM_GAS_CAP = 5000000;
     uint256 internal constant PAIRING_GAS_CAP = 20000000;
 
@@ -1132,7 +1104,6 @@ contract ShieldedPoolStatefulVerifier {{
     uint256 public rootsSetRoot;
     uint256 public blockHead;
     uint256 public lastSubroot;
-    uint256 public lastL2MetadataMerkleHash;
 
     event ValidationApplied(
         string message,
@@ -1142,12 +1113,7 @@ contract ShieldedPoolStatefulVerifier {{
         uint256 commitmentRoot,
         uint256 nullifierRoot,
         uint256 rootsSetRoot,
-        uint256 subroot,
-        uint256 metadataMerkleHash,
-        uint256 stateHashPre,
-        uint256 stateHashPost,
-        uint256 blockHashPre,
-        uint256 blockHashPost
+        uint256 subroot
     );
 
     constructor(
@@ -1162,23 +1128,6 @@ contract ShieldedPoolStatefulVerifier {{
         nullifierRoot = _nullifierRoot;
         rootsSetRoot = _rootsSetRoot;
         blockHead = _blockHead;
-    }}
-
-    function _stateHash(
-        uint256 cRoot,
-        uint256 nRoot,
-        uint256 rootsRoot,
-        uint256 blk
-    ) private pure returns (uint256) {{
-        return uint256(keccak256(abi.encodePacked(cRoot, nRoot, rootsRoot, blk)));
-    }}
-
-    function _blockHash(
-        uint256 blk,
-        uint256 subroot,
-        uint256 metadataMerkleHash
-    ) private pure returns (uint256) {{
-        return uint256(keccak256(abi.encodePacked(blk, subroot, metadataMerkleHash)));
     }}
 
     function _checkLimbRange(uint256 limb, uint256 idx) private pure {{
@@ -1393,42 +1342,6 @@ contract ShieldedPoolStatefulVerifier {{
         return (callOk, resultWord);
     }}
 
-    function _computeL2MetadataMerkleHash(
-        uint256[] calldata l2BlockMetadata
-    ) private pure returns (uint256) {{
-        if (l2BlockMetadata.length == 0) revert InvalidTransition(6);
-        if (l2BlockMetadata.length % L2_METADATA_WIDTH != 0) revert InvalidTransition(7);
-
-        uint256 leavesLen = l2BlockMetadata.length / L2_METADATA_WIDTH;
-        bytes32[] memory level = new bytes32[](leavesLen);
-        for (uint256 i = 0; i < leavesLen; ++i) {{
-            uint256 off = i * L2_METADATA_WIDTH;
-            level[i] = keccak256(
-                abi.encodePacked(
-                    l2BlockMetadata[off],
-                    l2BlockMetadata[off + 1],
-                    l2BlockMetadata[off + 2],
-                    l2BlockMetadata[off + 3],
-                    l2BlockMetadata[off + 4],
-                    l2BlockMetadata[off + 5],
-                    l2BlockMetadata[off + 6]
-                )
-            );
-        }}
-
-        uint256 n = leavesLen;
-        while (n > 1) {{
-            uint256 next = (n + 1) >> 1;
-            for (uint256 i = 0; i < next; ++i) {{
-                bytes32 left = level[i * 2];
-                bytes32 right = (i * 2 + 1 < n) ? level[i * 2 + 1] : left;
-                level[i] = keccak256(abi.encodePacked(left, right));
-            }}
-            n = next;
-        }}
-        return uint256(level[0]) % SCALAR_MODULUS;
-    }}
-
     function verifyAndUpdate(
         bytes calldata verifierCalldata,
         uint256 cPre,
@@ -1440,8 +1353,7 @@ contract ShieldedPoolStatefulVerifier {{
         uint256 subroot,
         uint256 preRootsSetRoot,
         uint256 postRootsSetRoot,
-        uint256[28] calldata finalAccumulatorPi,
-        uint256[] calldata l2BlockMetadata
+        uint256[28] calldata finalAccumulatorPi
     ) external returns (bool) {{
         if (cPre != commitmentRoot) revert InvalidTransition(1);
         if (nPre != nullifierRoot) revert InvalidTransition(2);
@@ -1449,27 +1361,7 @@ contract ShieldedPoolStatefulVerifier {{
         if (blkPre != blockHead) revert InvalidTransition(4);
         if (blkPost != blkPre + 1) revert InvalidTransition(5);
 
-        uint256 stateHashPre = _stateHash(
-            commitmentRoot,
-            nullifierRoot,
-            rootsSetRoot,
-            blockHead
-        );
-        uint256 blockHashPre = _blockHash(
-            blockHead,
-            lastSubroot,
-            lastL2MetadataMerkleHash
-        );
-
-        uint256 metadataMerkleHash = _computeL2MetadataMerkleHash(l2BlockMetadata);
-        if (verifierCalldata.length < L2_METADATA_MERKLE_PI_OFFSET + 0x20) revert InvalidTransition(8);
-
-        bytes memory verifierPayload = verifierCalldata;
-        assembly ("memory-safe") {{
-            mstore(add(add(verifierPayload, 0x20), {l2_metadata_merkle_pi_offset_hex}), metadataMerkleHash)
-        }}
-
-        (bool ok, bytes memory ret) = verifier.call(verifierPayload);
+        (bool ok, bytes memory ret) = verifier.call(verifierCalldata);
         if (!ok) revert VerifierCallFailed();
         if (ret.length >= 32) {{
             uint256 value;
@@ -1479,20 +1371,12 @@ contract ShieldedPoolStatefulVerifier {{
             if (value == 0) revert VerifierReturnedFalse();
         }}
 
-        (bool pairingCallOk, uint256 pairingResult) =
-            _checkFinalAccumulatorPairing(finalAccumulatorPi);
-        if (!pairingCallOk) revert InvalidAccumulatorPairingResult(pairingResult);
-        if (pairingResult != 1) revert InvalidAccumulatorPairingResult(pairingResult);
-
-        uint256 stateHashPost = _stateHash(cPost, nPost, postRootsSetRoot, blkPost);
-        uint256 blockHashPost = _blockHash(blkPost, subroot, metadataMerkleHash);
-
+    
         commitmentRoot = cPost;
         nullifierRoot = nPost;
         rootsSetRoot = postRootsSetRoot;
         blockHead = blkPost;
         lastSubroot = subroot;
-        lastL2MetadataMerkleHash = metadataMerkleHash;
         emit ValidationApplied(
             "Validation successful",
             blkPost,
@@ -1501,12 +1385,7 @@ contract ShieldedPoolStatefulVerifier {{
             cPost,
             nPost,
             postRootsSetRoot,
-            subroot,
-            metadataMerkleHash,
-            stateHashPre,
-            stateHashPost,
-            blockHashPre,
-            blockHashPost
+            subroot
         );
         return true;
     }}
@@ -1821,7 +1700,6 @@ contract ShieldedPoolStatefulVerifier {{
                 let state_call_data = encode_verify_and_update_call(
                     verifier_calldata,
                     &sample.public_inputs,
-                    &sample.l2_block_metadata,
                 )?;
                 let state_call_data_path =
                     out_dir.join(format!("batch_{batch_idx}_stateful_verifyAndUpdate.calldata"));
@@ -3015,7 +2893,6 @@ fn run() -> Result<(), AppError> {
                         batch_idx,
                         proof: final_proof_bytes.clone(),
                         public_inputs: final_public_inputs.clone(),
-                        l2_block_metadata: l2_block_metadata.clone(),
                     };
                     evm_bench_samples.push(sample.clone());
 

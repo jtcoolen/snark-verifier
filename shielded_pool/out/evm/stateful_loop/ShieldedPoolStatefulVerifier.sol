@@ -1,6 +1,6 @@
 
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.30;
+pragma solidity >=0.8.19 <0.9.0;
 
 contract ShieldedPoolStatefulVerifier {
     error InvalidTransition(uint256 code);
@@ -14,10 +14,6 @@ contract ShieldedPoolStatefulVerifier {
     uint256 internal constant LIMB_BITS = 56;
     uint256 internal constant LIMB_MASK = (1 << LIMB_BITS) - 1;
     uint256 internal constant LIMB4_LOW_MASK = (1 << 32) - 1;
-    uint256 internal constant SCALAR_MODULUS = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001;
-    uint256 internal constant L2_METADATA_WIDTH = 7;
-    uint256 internal constant L2_METADATA_MERKLE_PI_INDEX = 9;
-    uint256 internal constant L2_METADATA_MERKLE_PI_OFFSET = L2_METADATA_MERKLE_PI_INDEX * 0x20;
     uint256 internal constant G1MSM_GAS_CAP = 5000000;
     uint256 internal constant PAIRING_GAS_CAP = 20000000;
 
@@ -44,16 +40,16 @@ contract ShieldedPoolStatefulVerifier {
     uint256 public rootsSetRoot;
     uint256 public blockHead;
     uint256 public lastSubroot;
-    uint256 public lastL2MetadataMerkleHash;
 
     event ValidationApplied(
         string message,
         uint256 indexed l2BlockNumber,
+        uint256 blkPre,
+        uint256 blkPost,
         uint256 commitmentRoot,
         uint256 nullifierRoot,
         uint256 rootsSetRoot,
-        uint256 subroot,
-        uint256 metadataMerkleHash
+        uint256 subroot
     );
 
     constructor(
@@ -296,42 +292,6 @@ contract ShieldedPoolStatefulVerifier {
         return (callOk, resultWord);
     }
 
-    function _computeL2MetadataMerkleHash(
-        uint256[] calldata l2BlockMetadata
-    ) private pure returns (uint256) {
-        if (l2BlockMetadata.length == 0) revert InvalidTransition(6);
-        if (l2BlockMetadata.length % L2_METADATA_WIDTH != 0) revert InvalidTransition(7);
-
-        uint256 leavesLen = l2BlockMetadata.length / L2_METADATA_WIDTH;
-        bytes32[] memory level = new bytes32[](leavesLen);
-        for (uint256 i = 0; i < leavesLen; ++i) {
-            uint256 off = i * L2_METADATA_WIDTH;
-            level[i] = keccak256(
-                abi.encodePacked(
-                    l2BlockMetadata[off],
-                    l2BlockMetadata[off + 1],
-                    l2BlockMetadata[off + 2],
-                    l2BlockMetadata[off + 3],
-                    l2BlockMetadata[off + 4],
-                    l2BlockMetadata[off + 5],
-                    l2BlockMetadata[off + 6]
-                )
-            );
-        }
-
-        uint256 n = leavesLen;
-        while (n > 1) {
-            uint256 next = (n + 1) >> 1;
-            for (uint256 i = 0; i < next; ++i) {
-                bytes32 left = level[i * 2];
-                bytes32 right = (i * 2 + 1 < n) ? level[i * 2 + 1] : left;
-                level[i] = keccak256(abi.encodePacked(left, right));
-            }
-            n = next;
-        }
-        return uint256(level[0]) % SCALAR_MODULUS;
-    }
-
     function verifyAndUpdate(
         bytes calldata verifierCalldata,
         uint256 cPre,
@@ -343,8 +303,7 @@ contract ShieldedPoolStatefulVerifier {
         uint256 subroot,
         uint256 preRootsSetRoot,
         uint256 postRootsSetRoot,
-        uint256[28] calldata finalAccumulatorPi,
-        uint256[] calldata l2BlockMetadata
+        uint256[28] calldata finalAccumulatorPi
     ) external returns (bool) {
         if (cPre != commitmentRoot) revert InvalidTransition(1);
         if (nPre != nullifierRoot) revert InvalidTransition(2);
@@ -352,15 +311,7 @@ contract ShieldedPoolStatefulVerifier {
         if (blkPre != blockHead) revert InvalidTransition(4);
         if (blkPost != blkPre + 1) revert InvalidTransition(5);
 
-        uint256 metadataMerkleHash = _computeL2MetadataMerkleHash(l2BlockMetadata);
-        if (verifierCalldata.length < L2_METADATA_MERKLE_PI_OFFSET + 0x20) revert InvalidTransition(8);
-
-        bytes memory verifierPayload = verifierCalldata;
-        assembly ("memory-safe") {
-            mstore(add(add(verifierPayload, 0x20), 0x120), metadataMerkleHash)
-        }
-
-        (bool ok, bytes memory ret) = verifier.call(verifierPayload);
+        (bool ok, bytes memory ret) = verifier.call(verifierCalldata);
         if (!ok) revert VerifierCallFailed();
         if (ret.length >= 32) {
             uint256 value;
@@ -370,25 +321,21 @@ contract ShieldedPoolStatefulVerifier {
             if (value == 0) revert VerifierReturnedFalse();
         }
 
-        (bool pairingCallOk, uint256 pairingResult) =
-            _checkFinalAccumulatorPairing(finalAccumulatorPi);
-        if (!pairingCallOk) revert InvalidAccumulatorPairingResult(pairingResult);
-        if (pairingResult != 1) revert InvalidAccumulatorPairingResult(pairingResult);
-
+    
         commitmentRoot = cPost;
         nullifierRoot = nPost;
         rootsSetRoot = postRootsSetRoot;
         blockHead = blkPost;
         lastSubroot = subroot;
-        lastL2MetadataMerkleHash = metadataMerkleHash;
         emit ValidationApplied(
             "Validation successful",
+            blkPost,
+            blkPre,
             blkPost,
             cPost,
             nPost,
             postRootsSetRoot,
-            subroot,
-            metadataMerkleHash
+            subroot
         );
         return true;
     }
