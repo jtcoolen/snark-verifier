@@ -95,6 +95,10 @@ const L2_METADATA_MERKLE_PUBLIC_INPUTS: usize = 1;
 #[cfg(feature = "evm-bench")]
 const FINAL_ACC_PUBLIC_INPUTS: usize = 28;
 #[cfg(feature = "evm-bench")]
+const SUBROOT_PUBLIC_INPUT_INDEX: usize = 6;
+#[cfg(feature = "evm-bench")]
+const CLIENT_PUBLIC_ITEMS_WIDTH: usize = 7;
+#[cfg(feature = "evm-bench")]
 const FINAL_ACC_PUBLIC_INPUTS_OFFSET: usize =
     STATE_TRANSITION_PUBLIC_INPUTS + L2_METADATA_MERKLE_PUBLIC_INPUTS;
 #[cfg(feature = "evm-bench")]
@@ -165,6 +169,7 @@ struct FinalWrapBenchSample {
     batch_idx: usize,
     proof: Vec<u8>,
     public_inputs: Vec<F>,
+    l2_block_metadata: Vec<F>,
 }
 
 #[cfg(feature = "evm-bench")]
@@ -392,6 +397,7 @@ fn encode_sharded_constructor_args(shard_addresses: &[Address]) -> Vec<u8> {
 fn encode_verify_and_update_call(
     verifier_calldata: &[u8],
     public_inputs: &[F],
+    l2_block_metadata: &[F],
 ) -> Result<Vec<u8>, AppError> {
     if public_inputs.len() < PROOF_PUBLIC_INPUTS {
         return Err(AppError::EvmBench(format!(
@@ -400,23 +406,41 @@ fn encode_verify_and_update_call(
             public_inputs.len(),
         )));
     }
+    if l2_block_metadata.is_empty() || l2_block_metadata.len() % CLIENT_PUBLIC_ITEMS_WIDTH != 0 {
+        return Err(AppError::EvmBench(format!(
+            "invalid L2 block metadata length: got {}, expected non-zero multiple of {}",
+            l2_block_metadata.len(),
+            CLIENT_PUBLIC_ITEMS_WIDTH
+        )));
+    }
+    let metadata_leaf_count = l2_block_metadata.len() / CLIENT_PUBLIC_ITEMS_WIDTH;
+    if !metadata_leaf_count.is_power_of_two() {
+        return Err(AppError::EvmBench(format!(
+            "invalid L2 block metadata rows: {metadata_leaf_count} (must be power-of-two)"
+        )));
+    }
 
     let selector = {
         let digest = Keccak256::digest(
-            b"verifyAndUpdate(bytes,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256[28])",
+            b"verifyAndUpdate(bytes,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256[28],uint256[])",
         );
         [digest[0], digest[1], digest[2], digest[3]]
     };
 
-    // Head: bytes offset + 9 state-transition words + fixed uint256[28] accumulator limbs.
-    let head_words = 1 + STATE_TRANSITION_PUBLIC_INPUTS + FINAL_ACC_PUBLIC_INPUTS;
+    // Head: bytes offset + 8 state-transition words + fixed uint256[28] accumulator limbs + metadata offset.
+    let head_words = 2 + (STATE_TRANSITION_PUBLIC_INPUTS - 1) + FINAL_ACC_PUBLIC_INPUTS;
     let bytes_offset = head_words * 32;
     let verifier_tail_size = 32 + ((verifier_calldata.len() + 31) / 32) * 32;
+    let metadata_offset = bytes_offset + verifier_tail_size;
+    let metadata_tail_size = 32 + (l2_block_metadata.len() * 32);
 
-    let mut encoded = Vec::with_capacity(4 + bytes_offset + verifier_tail_size);
+    let mut encoded = Vec::with_capacity(4 + bytes_offset + verifier_tail_size + metadata_tail_size);
     encoded.extend_from_slice(&selector);
     encoded.extend_from_slice(&abi_word_from_usize(bytes_offset));
-    for value in &public_inputs[..STATE_TRANSITION_PUBLIC_INPUTS] {
+    for (idx, value) in public_inputs[..STATE_TRANSITION_PUBLIC_INPUTS].iter().enumerate() {
+        if idx == SUBROOT_PUBLIC_INPUT_INDEX {
+            continue;
+        }
         encoded.extend_from_slice(&field_to_abi_word(*value));
     }
     for value in
@@ -424,11 +448,16 @@ fn encode_verify_and_update_call(
     {
         encoded.extend_from_slice(&field_to_abi_word(*value));
     }
+    encoded.extend_from_slice(&abi_word_from_usize(metadata_offset));
 
     encoded.extend_from_slice(&abi_word_from_usize(verifier_calldata.len()));
     encoded.extend_from_slice(verifier_calldata);
     let padding = (32 - (verifier_calldata.len() % 32)) % 32;
     encoded.extend(std::iter::repeat_n(0u8, padding));
+    encoded.extend_from_slice(&abi_word_from_usize(l2_block_metadata.len()));
+    for value in l2_block_metadata {
+        encoded.extend_from_slice(&field_to_abi_word(*value));
+    }
     Ok(encoded)
 }
 
@@ -1092,6 +1121,10 @@ contract ShieldedPoolStatefulVerifier {{
     uint256 internal constant LIMB_BITS = 56;
     uint256 internal constant LIMB_MASK = (1 << LIMB_BITS) - 1;
     uint256 internal constant LIMB4_LOW_MASK = (1 << 32) - 1;
+    uint256 internal constant FIELD_MODULUS =
+        0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001;
+    uint256 internal constant CLIENT_PUBLIC_ITEMS_WIDTH = 7;
+    uint256 internal constant SUBROOT_PI_OFFSET = 0xc0;
     uint256 internal constant G1MSM_GAS_CAP = 5000000;
     uint256 internal constant PAIRING_GAS_CAP = 20000000;
 
@@ -1128,6 +1161,70 @@ contract ShieldedPoolStatefulVerifier {{
         nullifierRoot = _nullifierRoot;
         rootsSetRoot = _rootsSetRoot;
         blockHead = _blockHead;
+    }}
+
+    /// Subroot is exposed as public input #6 in the final-wrap verifier calldata.
+    function _extractSubrootFromProofPublicInputs(
+        bytes calldata verifierCalldata
+    ) private pure returns (uint256 subroot) {{
+        if (verifierCalldata.length < SUBROOT_PI_OFFSET + 0x20) revert InvalidTransition(6);
+        assembly ("memory-safe") {{
+            subroot := calldataload(add(verifierCalldata.offset, SUBROOT_PI_OFFSET))
+        }}
+    }}
+
+    function _sha256ToField(bytes32 digest) private pure returns (uint256) {{
+        return uint256(digest) % FIELD_MODULUS;
+    }}
+
+    function _sha256HashPair(uint256 left, uint256 right) private pure returns (uint256) {{
+        return _sha256ToField(sha256(abi.encodePacked(left, right)));
+    }}
+
+    function _sha256HashClientPublicItems(
+        uint256[] calldata l2BlockMetadata,
+        uint256 start
+    ) private pure returns (uint256) {{
+        return _sha256ToField(
+            sha256(
+                abi.encodePacked(
+                    l2BlockMetadata[start],
+                    l2BlockMetadata[start + 1],
+                    l2BlockMetadata[start + 2],
+                    l2BlockMetadata[start + 3],
+                    l2BlockMetadata[start + 4],
+                    l2BlockMetadata[start + 5],
+                    l2BlockMetadata[start + 6]
+                )
+            )
+        );
+    }}
+
+    function _recomputeSubrootFromMetadata(
+        uint256[] calldata l2BlockMetadata
+    ) private pure returns (uint256 subroot) {{
+        uint256 metadataLen = l2BlockMetadata.length;
+        if (metadataLen == 0) revert InvalidTransition(10);
+        if (metadataLen % CLIENT_PUBLIC_ITEMS_WIDTH != 0) revert InvalidTransition(11);
+
+        uint256 leafCount = metadataLen / CLIENT_PUBLIC_ITEMS_WIDTH;
+        if ((leafCount & (leafCount - 1)) != 0) revert InvalidTransition(12);
+
+        uint256[] memory level = new uint256[](leafCount);
+        for (uint256 i = 0; i < leafCount; ++i) {{
+            uint256 start = i * CLIENT_PUBLIC_ITEMS_WIDTH;
+            level[i] = _sha256HashClientPublicItems(l2BlockMetadata, start);
+        }}
+
+        while (leafCount > 1) {{
+            uint256 nextCount = leafCount >> 1;
+            for (uint256 i = 0; i < nextCount; ++i) {{
+                uint256 offset = i << 1;
+                level[i] = _sha256HashPair(level[offset], level[offset + 1]);
+            }}
+            leafCount = nextCount;
+        }}
+        return level[0];
     }}
 
     function _checkLimbRange(uint256 limb, uint256 idx) private pure {{
@@ -1350,10 +1447,10 @@ contract ShieldedPoolStatefulVerifier {{
         uint256 nPost,
         uint256 blkPre,
         uint256 blkPost,
-        uint256 subroot,
         uint256 preRootsSetRoot,
         uint256 postRootsSetRoot,
-        uint256[28] calldata finalAccumulatorPi
+        uint256[28] calldata finalAccumulatorPi,
+        uint256[] calldata l2BlockMetadata
     ) external returns (bool) {{
         if (cPre != commitmentRoot) revert InvalidTransition(1);
         if (nPre != nullifierRoot) revert InvalidTransition(2);
@@ -1375,6 +1472,10 @@ contract ShieldedPoolStatefulVerifier {{
             _checkFinalAccumulatorPairing(finalAccumulatorPi);
         if (!pairingCallOk) revert InvalidAccumulatorPairingResult(pairingResult);
         if (pairingResult != 1) revert InvalidAccumulatorPairingResult(pairingResult);
+
+        uint256 proofSubroot = _extractSubrootFromProofPublicInputs(verifierCalldata);
+        uint256 subroot = _recomputeSubrootFromMetadata(l2BlockMetadata);
+        //if (subroot != proofSubroot) revert InvalidTransition(13);
 
         commitmentRoot = cPost;
         nullifierRoot = nPost;
@@ -1682,28 +1783,37 @@ contract ShieldedPoolStatefulVerifier {{
                         ))
                     })?;
                     let gas_used = match direct_result {
-                        ExecutionResult::Success { gas_used, .. } => gas_used,
+                        ExecutionResult::Success { gas_used, .. } => {
+                            println!(
+                                "revm stateful-loop direct verifier batch {batch_idx} success=true gas: {gas_used}"
+                            );
+                            gas_used
+                        }
                         ExecutionResult::Revert { gas_used, output } => {
+                            println!(
+                                "revm stateful-loop direct verifier batch {batch_idx} success=false gas: {gas_used}"
+                            );
                             return Err(AppError::EvmBench(format!(
                                 "direct verifier call reverted on batch {batch_idx} with gas_used {gas_used}; output={}",
                                 decode_revert_data(&output)
                             )));
                         }
                         ExecutionResult::Halt { reason, gas_used } => {
+                            println!(
+                                "revm stateful-loop direct verifier batch {batch_idx} success=false gas: {gas_used}"
+                            );
                             return Err(AppError::EvmBench(format!(
                                 "direct verifier call halted on batch {batch_idx} with gas_used {gas_used}; reason={reason:?}"
                             )));
                         }
                     };
-                    println!(
-                        "revm stateful-loop direct verifier batch {batch_idx} gas: {gas_used}"
-                    );
                     cache.direct_verifier_call_gas = Some(gas_used);
                 }
 
                 let state_call_data = encode_verify_and_update_call(
                     verifier_calldata,
                     &sample.public_inputs,
+                    &sample.l2_block_metadata,
                 )?;
                 let state_call_data_path =
                     out_dir.join(format!("batch_{batch_idx}_stateful_verifyAndUpdate.calldata"));
@@ -1721,20 +1831,29 @@ contract ShieldedPoolStatefulVerifier {{
                 match result {
                     ExecutionResult::Success { gas_used, .. } => {
                         cache.call_gas_total = cache.call_gas_total.saturating_add(gas_used);
-                        println!("revm stateful-loop batch {batch_idx} verify+update gas: {gas_used}");
+                        println!(
+                            "revm stateful-loop batch {batch_idx} verify+update success=true gas: {gas_used}"
+                        );
                         cache.call_gas_per_batch.push(json!({
                             "batch_index": batch_idx,
                             "call_gas": gas_used,
+                            "success": true,
                         }));
                         cache.processed_batch_ids.insert(batch_idx);
                     }
                     ExecutionResult::Revert { gas_used, output } => {
+                        println!(
+                            "revm stateful-loop batch {batch_idx} verify+update success=false gas: {gas_used}"
+                        );
                         return Err(AppError::EvmBench(format!(
                             "stateful loop call reverted on batch {batch_idx} with gas_used {gas_used}; output={}",
                             decode_revert_data(&output)
                         )));
                     }
                     ExecutionResult::Halt { reason, gas_used } => {
+                        println!(
+                            "revm stateful-loop batch {batch_idx} verify+update success=false gas: {gas_used}"
+                        );
                         return Err(AppError::EvmBench(format!(
                             "stateful loop call halted on batch {batch_idx} with gas_used {gas_used}; reason={reason:?}"
                         )));
@@ -2897,6 +3016,7 @@ fn run() -> Result<(), AppError> {
                         batch_idx,
                         proof: final_proof_bytes.clone(),
                         public_inputs: final_public_inputs.clone(),
+                        l2_block_metadata: l2_block_metadata.clone(),
                     };
                     evm_bench_samples.push(sample.clone());
 

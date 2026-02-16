@@ -14,6 +14,10 @@ contract ShieldedPoolStatefulVerifier {
     uint256 internal constant LIMB_BITS = 56;
     uint256 internal constant LIMB_MASK = (1 << LIMB_BITS) - 1;
     uint256 internal constant LIMB4_LOW_MASK = (1 << 32) - 1;
+    uint256 internal constant FIELD_MODULUS =
+        0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001;
+    uint256 internal constant CLIENT_PUBLIC_ITEMS_WIDTH = 7;
+    uint256 internal constant SUBROOT_PI_OFFSET = 0xc0;
     uint256 internal constant G1MSM_GAS_CAP = 5000000;
     uint256 internal constant PAIRING_GAS_CAP = 20000000;
 
@@ -64,6 +68,70 @@ contract ShieldedPoolStatefulVerifier {
         nullifierRoot = _nullifierRoot;
         rootsSetRoot = _rootsSetRoot;
         blockHead = _blockHead;
+    }
+
+    /// Subroot is exposed as public input #6 in the final-wrap verifier calldata.
+    function _extractSubrootFromProofPublicInputs(
+        bytes calldata verifierCalldata
+    ) private pure returns (uint256 subroot) {
+        if (verifierCalldata.length < SUBROOT_PI_OFFSET + 0x20) revert InvalidTransition(6);
+        assembly ("memory-safe") {
+            subroot := calldataload(add(verifierCalldata.offset, SUBROOT_PI_OFFSET))
+        }
+    }
+
+    function _sha256ToField(bytes32 digest) private pure returns (uint256) {
+        return uint256(digest) % FIELD_MODULUS;
+    }
+
+    function _sha256HashPair(uint256 left, uint256 right) private pure returns (uint256) {
+        return _sha256ToField(sha256(abi.encodePacked(left, right)));
+    }
+
+    function _sha256HashClientPublicItems(
+        uint256[] calldata l2BlockMetadata,
+        uint256 start
+    ) private pure returns (uint256) {
+        return _sha256ToField(
+            sha256(
+                abi.encodePacked(
+                    l2BlockMetadata[start],
+                    l2BlockMetadata[start + 1],
+                    l2BlockMetadata[start + 2],
+                    l2BlockMetadata[start + 3],
+                    l2BlockMetadata[start + 4],
+                    l2BlockMetadata[start + 5],
+                    l2BlockMetadata[start + 6]
+                )
+            )
+        );
+    }
+
+    function _recomputeSubrootFromMetadata(
+        uint256[] calldata l2BlockMetadata
+    ) private pure returns (uint256 subroot) {
+        uint256 metadataLen = l2BlockMetadata.length;
+        if (metadataLen == 0) revert InvalidTransition(10);
+        if (metadataLen % CLIENT_PUBLIC_ITEMS_WIDTH != 0) revert InvalidTransition(11);
+
+        uint256 leafCount = metadataLen / CLIENT_PUBLIC_ITEMS_WIDTH;
+        if ((leafCount & (leafCount - 1)) != 0) revert InvalidTransition(12);
+
+        uint256[] memory level = new uint256[](leafCount);
+        for (uint256 i = 0; i < leafCount; ++i) {
+            uint256 start = i * CLIENT_PUBLIC_ITEMS_WIDTH;
+            level[i] = _sha256HashClientPublicItems(l2BlockMetadata, start);
+        }
+
+        while (leafCount > 1) {
+            uint256 nextCount = leafCount >> 1;
+            for (uint256 i = 0; i < nextCount; ++i) {
+                uint256 offset = i << 1;
+                level[i] = _sha256HashPair(level[offset], level[offset + 1]);
+            }
+            leafCount = nextCount;
+        }
+        return level[0];
     }
 
     function _checkLimbRange(uint256 limb, uint256 idx) private pure {
@@ -300,10 +368,10 @@ contract ShieldedPoolStatefulVerifier {
         uint256 nPost,
         uint256 blkPre,
         uint256 blkPost,
-        uint256 subroot,
         uint256 preRootsSetRoot,
         uint256 postRootsSetRoot,
-        uint256[28] calldata finalAccumulatorPi
+        uint256[28] calldata finalAccumulatorPi,
+        uint256[] calldata l2BlockMetadata
     ) external returns (bool) {
         if (cPre != commitmentRoot) revert InvalidTransition(1);
         if (nPre != nullifierRoot) revert InvalidTransition(2);
@@ -325,6 +393,10 @@ contract ShieldedPoolStatefulVerifier {
             _checkFinalAccumulatorPairing(finalAccumulatorPi);
         if (!pairingCallOk) revert InvalidAccumulatorPairingResult(pairingResult);
         if (pairingResult != 1) revert InvalidAccumulatorPairingResult(pairingResult);
+
+        uint256 proofSubroot = _extractSubrootFromProofPublicInputs(verifierCalldata);
+        uint256 subroot = _recomputeSubrootFromMetadata(l2BlockMetadata);
+        if (subroot != proofSubroot) revert InvalidTransition(13);
 
         commitmentRoot = cPost;
         nullifierRoot = nPost;
