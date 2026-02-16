@@ -1102,7 +1102,7 @@ fn emit_final_wrap_evm_stateful_loop_bench(
     let stateful_solidity = format!(
         r#"
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.30;
+pragma solidity >=0.8.19 <0.9.0;
 
 contract ShieldedPoolStatefulVerifier {{
     error InvalidTransition(uint256 code);

@@ -109,7 +109,7 @@ fn build_unrolled_shard_solidity(
         r#"
 // SPDX-License-Identifier: MIT
 
-pragma solidity 0.8.30;
+pragma solidity >=0.8.19 <0.9.0;
 
 contract {contract_name} {{
     fallback(bytes calldata) external returns (bytes memory) {{
@@ -139,7 +139,7 @@ fn build_unrolled_dispatcher_solidity(success_slot: usize) -> String {
         r#"
 // SPDX-License-Identifier: MIT
 
-pragma solidity 0.8.30;
+pragma solidity >=0.8.19 <0.9.0;
 
 contract Halo2VerifierDispatcher {{
     address[] private shards;
