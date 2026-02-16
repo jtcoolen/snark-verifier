@@ -321,7 +321,11 @@ contract ShieldedPoolStatefulVerifier {
             if (value == 0) revert VerifierReturnedFalse();
         }
 
-    
+        (bool pairingCallOk, uint256 pairingResult) =
+            _checkFinalAccumulatorPairing(finalAccumulatorPi);
+        if (!pairingCallOk) revert InvalidAccumulatorPairingResult(pairingResult);
+        if (pairingResult != 1) revert InvalidAccumulatorPairingResult(pairingResult);
+
         commitmentRoot = cPost;
         nullifierRoot = nPost;
         rootsSetRoot = postRootsSetRoot;

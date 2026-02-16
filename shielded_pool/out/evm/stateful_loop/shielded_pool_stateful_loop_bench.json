@@ -23,8 +23,8 @@
     "all_shard_initcode_within_limit": true
   },
   "stateful_contract": {
-    "runtime_code_bytes": 1045,
-    "deployment_code_bytes": 1214,
+    "runtime_code_bytes": 3216,
+    "deployment_code_bytes": 3385,
     "runtime_code_limit_bytes": 24576,
     "runtime_code_within_limit": true,
     "initcode_limit_bytes": 49152,
@@ -36,13 +36,13 @@
     "shard_deploy_gas": 20709008,
     "dispatcher_deploy_gas": 220598,
     "verifier_deploy_gas_total": 20929606,
-    "direct_verifier_call_gas": 1387454,
-    "state_contract_deploy_gas": 351773,
-    "call_gas_total": 1465713,
+    "direct_verifier_call_gas": 1387538,
+    "state_contract_deploy_gas": 821190,
+    "call_gas_total": 1596554,
     "call_gas_per_batch": [
       {
         "batch_index": 0,
-        "call_gas": 1465713
+        "call_gas": 1596554
       }
     ],
     "error": null
