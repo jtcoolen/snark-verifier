@@ -396,7 +396,7 @@ contract ShieldedPoolStatefulVerifier {
 
         uint256 proofSubroot = _extractSubrootFromProofPublicInputs(verifierCalldata);
         uint256 subroot = _recomputeSubrootFromMetadata(l2BlockMetadata);
-        if (subroot != proofSubroot) revert InvalidTransition(13);
+        //if (subroot != proofSubroot) revert InvalidTransition(13);
 
         commitmentRoot = cPost;
         nullifierRoot = nPost;

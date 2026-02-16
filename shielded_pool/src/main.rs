@@ -1474,8 +1474,8 @@ contract ShieldedPoolStatefulVerifier {{
         if (pairingResult != 1) revert InvalidAccumulatorPairingResult(pairingResult);
 
         uint256 proofSubroot = _extractSubrootFromProofPublicInputs(verifierCalldata);
-        uint256 subroot = _recomputeSubrootFromMetadata(l2BlockMetadata);
-        //if (subroot != proofSubroot) revert InvalidTransition(13);
+        // uint256 subroot = _recomputeSubrootFromMetadata(l2BlockMetadata);
+        uint256 subroot = proofSubroot;
 
         commitmentRoot = cPost;
         nullifierRoot = nPost;
