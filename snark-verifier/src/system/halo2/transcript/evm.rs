@@ -48,7 +48,7 @@ where
 
     /// Load `num_instance` instances from calldata to memory.
     pub fn load_instances(&mut self, num_instance: Vec<usize>) -> Vec<Vec<Scalar>> {
-        num_instance
+        let instances = num_instance
             .into_iter()
             .map(|len| {
                 iter::repeat_with(|| {
@@ -59,7 +59,17 @@ where
                 .take(len)
                 .collect_vec()
             })
-            .collect()
+            .collect();
+
+        // Keep transcript bytes in a dedicated contiguous region after
+        // preloaded calldata values.
+        if self.buf.end() != self.loader.ptr() {
+            let ptr = self.loader.allocate(0x20);
+            self.buf.reset(ptr);
+            self.buf.extend(0x20);
+        }
+
+        instances
     }
 }
 
@@ -105,8 +115,17 @@ where
 
     fn common_ec_point(&mut self, ec_point: &EcPoint) -> Result<(), Error> {
         if let Value::Memory(ptr) = ec_point.value() {
-            assert_eq!(self.buf.end(), ptr);
-            self.buf.extend(self.loader.evm_ec_point_bytes());
+            if self.buf.end() == ptr {
+                self.buf.extend(self.loader.evm_ec_point_bytes());
+            } else {
+                let dst = self.loader.dup_ec_point(ec_point);
+                if let Value::Memory(dst_ptr) = dst.value() {
+                    assert_eq!(self.buf.end(), dst_ptr);
+                    self.buf.extend(self.loader.evm_ec_point_bytes());
+                } else {
+                    unreachable!()
+                }
+            }
         } else {
             unreachable!()
         }
@@ -125,8 +144,16 @@ where
                 self.buf.extend(0x20);
             }
             Value::Memory(ptr) => {
-                assert_eq!(self.buf.end(), ptr);
-                self.buf.extend(0x20);
+                if self.buf.end() == ptr {
+                    self.buf.extend(0x20);
+                } else {
+                    let dst = self.loader.allocate(0x20);
+                    assert_eq!(self.buf.end(), dst);
+                    self.loader
+                        .code_mut()
+                        .runtime_append(format!("mstore({dst:#x}, mload({ptr:#x}))"));
+                    self.buf.extend(0x20);
+                }
             }
             _ => unreachable!(),
         }
