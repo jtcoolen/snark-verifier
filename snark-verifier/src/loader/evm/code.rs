@@ -1,8 +1,8 @@
 pub enum Precompiled {
     BigModExp = 0x05,
-    Bn254Add = 0x6,
-    Bn254ScalarMul = 0x7,
-    Bn254Pairing = 0x8,
+    Bls12_381G1Add = 0x0a,
+    Bls12_381G1Msm = 0x0b,
+    Bls12_381Pairing = 0x0e,
 }
 
 #[derive(Clone, Debug)]

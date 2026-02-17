@@ -334,9 +334,12 @@ impl EvmLoader {
     fn staticcall(self: &Rc<Self>, precompile: Precompiled, cd_ptr: usize, rd_ptr: usize) {
         let (cd_len, rd_len) = match precompile {
             Precompiled::BigModExp => (0xc0, 0x20),
-            Precompiled::Bn254Add => (0x80, 0x40),
-            Precompiled::Bn254ScalarMul => (0x60, 0x40),
-            Precompiled::Bn254Pairing => (0x180, 0x20),
+            Precompiled::Bls12_381G1Add => (2 * BLS_G1_BYTES, BLS_G1_BYTES),
+            // We use G1MSM with a single pair: [G1 point (128 bytes) || scalar (32 bytes)].
+            Precompiled::Bls12_381G1Msm => (BLS_G1_BYTES + 0x20, BLS_G1_BYTES),
+            // 2 pairings in one call:
+            //   [G1 (128) || G2 (256)] * 2 = 768 bytes
+            Precompiled::Bls12_381Pairing => (2 * (BLS_G1_BYTES + BLS_G2_BYTES), 0x20),
         };
         let a = precompile as usize;
         let code = format!("success := and(eq(staticcall(gas(), {a:#x}, {cd_ptr:#x}, {cd_len:#x}, {rd_ptr:#x}, {rd_len:#x}), 1), success)");
@@ -361,14 +364,14 @@ impl EvmLoader {
     fn ec_point_add(self: &Rc<Self>, lhs: &EcPoint, rhs: &EcPoint) -> EcPoint {
         let rd_ptr = self.dup_ec_point(lhs).ptr();
         self.dup_ec_point(rhs);
-        self.staticcall(Precompiled::Bn254Add, rd_ptr, rd_ptr);
+        self.staticcall(Precompiled::Bls12_381G1Add, rd_ptr, rd_ptr);
         self.ec_point(Value::Memory(rd_ptr))
     }
 
     fn ec_point_scalar_mul(self: &Rc<Self>, ec_point: &EcPoint, scalar: &Scalar) -> EcPoint {
         let rd_ptr = self.dup_ec_point(ec_point).ptr();
         self.dup_scalar(scalar);
-        self.staticcall(Precompiled::Bn254ScalarMul, rd_ptr, rd_ptr);
+        self.staticcall(Precompiled::Bls12_381G1Msm, rd_ptr, rd_ptr);
         self.ec_point(Value::Memory(rd_ptr))
     }
 
@@ -421,7 +424,7 @@ impl EvmLoader {
             .join("\n");
         self.code.borrow_mut().runtime_append(minus_s_g2_code);
 
-        self.staticcall(Precompiled::Bn254Pairing, rd_ptr, rd_ptr);
+        self.staticcall(Precompiled::Bls12_381Pairing, rd_ptr, rd_ptr);
         let code = format!("success := and(eq(mload({rd_ptr:#x}), 1), success)");
         self.code.borrow_mut().runtime_append(code);
     }
