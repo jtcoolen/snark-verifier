@@ -20,6 +20,76 @@ use std::collections::{BTreeMap, BTreeSet};
 #[cfg(feature = "loader_evm")]
 use std::rc::Rc;
 
+fn truncate_scalar_to_half_bytes<F: PrimeField>(scalar: F) -> F {
+    let mut repr = scalar.to_repr();
+    let nb_bytes = F::NUM_BITS.div_ceil(8).div_ceil(2) as usize;
+    for byte in repr.as_mut().iter_mut().skip(nb_bytes) {
+        *byte = 0;
+    }
+    Option::from(F::from_repr(repr)).expect("truncated scalar must be canonical")
+}
+
+trait MidnightTruncatedChallengeOps<C: CurveAffine>: Loader<C> {
+    fn truncate_challenge_128(&self, value: &Self::LoadedScalar) -> Self::LoadedScalar;
+
+    fn powers_with_challenge_policy(
+        &self,
+        base: &Self::LoadedScalar,
+        n: usize,
+    ) -> Vec<Self::LoadedScalar> {
+        #[cfg(not(feature = "truncated-challenges"))]
+        {
+            return base.powers(n);
+        }
+
+        #[cfg(feature = "truncated-challenges")]
+        {
+        let mut powers = Vec::with_capacity(n);
+        let mut power = self.load_one();
+        for _ in 0..n {
+            powers.push(self.truncate_challenge_128(&power));
+            power = power * base;
+        }
+        powers
+        }
+    }
+}
+
+impl<C> MidnightTruncatedChallengeOps<C> for NativeLoader
+where
+    C: CurveAffine,
+    C::ScalarExt: PrimeField,
+{
+    fn truncate_challenge_128(&self, value: &Self::LoadedScalar) -> Self::LoadedScalar {
+        #[cfg(feature = "truncated-challenges")]
+        {
+        truncate_scalar_to_half_bytes(*value)
+        }
+        #[cfg(not(feature = "truncated-challenges"))]
+        {
+            value.clone()
+        }
+    }
+}
+
+#[cfg(feature = "loader_evm")]
+impl<C> MidnightTruncatedChallengeOps<C> for Rc<EvmLoader>
+where
+    C: CurveAffine,
+    C::ScalarExt: PrimeField<Repr = [u8; 32]>,
+{
+    fn truncate_challenge_128(&self, value: &Self::LoadedScalar) -> Self::LoadedScalar {
+        #[cfg(feature = "truncated-challenges")]
+        {
+        self.truncate_scalar_to_128(value)
+        }
+        #[cfg(not(feature = "truncated-challenges"))]
+        {
+            value.clone()
+        }
+    }
+}
+
 /// Verifier of Midnight's KZG multi-open proof format.
 ///
 /// This format differs from halo2's GWC/BDFG encodings and follows the
@@ -133,7 +203,7 @@ fn verify_midnight<C, L>(
 ) -> Result<KzgAccumulator<C, L>, Error>
 where
     C: CurveAffine,
-    L: Loader<C>,
+    L: Loader<C> + MidnightTruncatedChallengeOps<C>,
 {
     let (commitment_map, point_sets) = construct_intermediate_sets(queries)?;
     if point_sets.len() != proof.q_evals_on_x3.len() {
@@ -195,7 +265,14 @@ where
         .collect_vec();
 
     // Reconstruct f(x3) from q-evals and point sets.
-    let mut f_eval = loader.load_zero();
+    // Batch all interpolation and final-round denominators into one inversion pass.
+    #[cfg(feature = "truncated-challenges")]
+    let x3 = loader.truncate_challenge_128(&proof.x3);
+    #[cfg(not(feature = "truncated-challenges"))]
+    let x3 = proof.x3.clone();
+
+    let mut f_eval_terms = Vec::with_capacity(point_sets.len());
+    let mut den_pool = Vec::<L::LoadedScalar>::new();
     for ((shifts, evals), proof_eval) in
         point_sets.iter().zip(q_eval_sets.iter()).zip(proof.q_evals_on_x3.iter()).rev()
     {
@@ -211,29 +288,67 @@ where
                     })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let r_eval = lagrange_interpolate_eval_loaded::<C, L>(&points, evals, &proof.x3)?;
 
-        let den =
-            points.iter().fold(loader.load_one(), |acc, point| acc * &(proof.x3.clone() - point));
-        let den_inv = den.invert().ok_or_else(|| {
-            Error::InvalidProtocol(
-                "encountered non-invertible denominator while computing f(x3)".to_string(),
-            )
-        })?;
-        let eval = (proof_eval.clone() - r_eval) * &den_inv;
+        if points.len() != evals.len() {
+            return Err(Error::InvalidProtocol(format!(
+                "lagrange interpolation size mismatch: points={}, evals={}",
+                points.len(),
+                evals.len()
+            )));
+        }
+
+        let lagrange_start = den_pool.len();
+        if points.len() > 1 {
+            den_pool.extend((0..points.len()).map(|j| {
+                points
+                    .iter()
+                    .enumerate()
+                    .filter(|(k, _)| *k != j)
+                    .fold(loader.load_one(), |acc, (_, x_k)| acc * &(points[j].clone() - x_k))
+            }));
+        }
+        let den = points.iter().fold(loader.load_one(), |acc, point| acc * &(x3.clone() - point));
+        let den_idx = den_pool.len();
+        den_pool.push(den);
+
+        f_eval_terms.push((proof_eval.clone(), evals.clone(), points, lagrange_start, den_idx));
+    }
+
+    if !den_pool.is_empty() {
+        <L as ScalarLoader<C::ScalarExt>>::batch_invert(den_pool.iter_mut());
+    }
+
+    let mut f_eval = loader.load_zero();
+    for (proof_eval, evals, points, lagrange_start, den_idx) in f_eval_terms {
+        let r_eval = if points.is_empty() {
+            loader.load_zero()
+        } else if points.len() == 1 {
+            evals[0].clone()
+        } else {
+            evals.iter().enumerate().fold(loader.load_zero(), |acc, (j, eval)| {
+                let numer = points
+                    .iter()
+                    .enumerate()
+                    .filter(|(k, _)| *k != j)
+                    .fold(loader.load_one(), |acc, (_, point)| acc * &(x3.clone() - point));
+                acc + eval.clone() * &numer * &den_pool[lagrange_start + j]
+            })
+        };
+
+        let eval = (proof_eval - r_eval) * &den_pool[den_idx];
         f_eval = f_eval * &proof.x2 + &eval;
     }
 
     let final_com = {
         let mut coms = q_coms;
         coms.push(Msm::base(&proof.f_com));
-        let powers_x4 = proof.x4.powers(coms.len());
+    let powers_x4 = loader.powers_with_challenge_policy(&proof.x4, coms.len());
         coms.into_iter().zip(powers_x4.iter()).map(|(msm, scalar)| msm * scalar).sum::<Msm<_, _>>()
     };
     let v = {
         let mut evals = proof.q_evals_on_x3.clone();
         evals.push(f_eval);
-        let powers_x4 = proof.x4.powers(evals.len());
+        let powers_x4 = loader.powers_with_challenge_policy(&proof.x4, evals.len());
         evals
             .into_iter()
             .zip(powers_x4.into_iter())
