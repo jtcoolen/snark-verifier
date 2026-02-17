@@ -627,6 +627,9 @@ name = "bitflags"
 version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
+dependencies = [
+ "serde_core",
+]
 
 [[package]]
 name = "bitvec"
@@ -636,6 +639,7 @@ checksum = "1bc2832c24239b0141d5674bb9174f9d68a8b5b3f2753311927c172ca46f7e9c"
 dependencies = [
  "funty",
  "radium",
+ "serde",
  "tap",
  "wyz",
 ]
@@ -1332,6 +1336,9 @@ name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "elliptic-curve"
@@ -1620,7 +1627,6 @@ dependencies = [
 name = "halo2-base"
 version = "0.5.1"
 dependencies = [
- "ark-std 0.3.0",
  "getset",
  "halo2-axiom",
  "halo2_proofs",
@@ -1631,7 +1637,6 @@ dependencies = [
  "num-integer",
  "num-traits",
  "poseidon-primitives",
- "rand 0.8.5",
  "rand_chacha 0.3.1",
  "rayon",
  "rustc-hash 1.1.0",
@@ -2415,6 +2420,7 @@ checksum = "1fd6780a80ae0c52cc120a26a1a42c1ae51b247a253e4e06113d23d2c2edd078"
 dependencies = [
  "phf_macros",
  "phf_shared",
+ "serde",
 ]
 
 [[package]]
@@ -2996,6 +3002,7 @@ dependencies = [
  "ark-serialize 0.5.0",
  "arrayref",
  "aurora-engine-modexp",
+ "blst",
  "c-kzg",
  "cfg-if",
  "k256",
@@ -3522,7 +3529,6 @@ dependencies = [
  "crossterm 0.25.0",
  "halo2-base",
  "halo2-ecc",
- "halo2curves-axiom",
  "hex",
  "itertools 0.11.0",
  "lazy_static",
