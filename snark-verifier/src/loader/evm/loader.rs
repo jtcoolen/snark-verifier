@@ -376,44 +376,51 @@ impl EvmLoader {
     pub fn pairing(
         self: &Rc<Self>,
         lhs: &EcPoint,
-        g2: (U256, U256, U256, U256),
+        g2: &[U256],
         rhs: &EcPoint,
-        minus_s_g2: (U256, U256, U256, U256),
+        minus_s_g2: &[U256],
     ) {
+        assert_eq!(
+            g2.len(),
+            BLS_G2_BYTES / 0x20,
+            "g2 must contain exactly 8 words (256 bytes)"
+        );
+        assert_eq!(
+            minus_s_g2.len(),
+            BLS_G2_BYTES / 0x20,
+            "minus_s_g2 must contain exactly 8 words (256 bytes)"
+        );
+
         let rd_ptr = self.dup_ec_point(lhs).ptr();
-        self.allocate(0x80);
-        let g2_0 = hex_encode_u256(&g2.0);
-        let g2_0_ptr = rd_ptr + 0x40;
-        let g2_1 = hex_encode_u256(&g2.1);
-        let g2_1_ptr = rd_ptr + 0x60;
-        let g2_2 = hex_encode_u256(&g2.2);
-        let g2_2_ptr = rd_ptr + 0x80;
-        let g2_3 = hex_encode_u256(&g2.3);
-        let g2_3_ptr = rd_ptr + 0xa0;
-        let code = format!(
-            "mstore({g2_0_ptr:#x}, {g2_0})
-            mstore({g2_1_ptr:#x}, {g2_1})
-            mstore({g2_2_ptr:#x}, {g2_2})
-            mstore({g2_3_ptr:#x}, {g2_3})"
-        );
-        self.code.borrow_mut().runtime_append(code);
+        self.allocate(BLS_G2_BYTES);
+        let g2_code = g2
+            .iter()
+            .enumerate()
+            .map(|(idx, word)| {
+                format!(
+                    "mstore({:#x}, {})",
+                    rd_ptr + BLS_G1_BYTES + idx * 0x20,
+                    hex_encode_u256(word)
+                )
+            })
+            .join("\n");
+        self.code.borrow_mut().runtime_append(g2_code);
+
         self.dup_ec_point(rhs);
-        self.allocate(0x80);
-        let minus_s_g2_0 = hex_encode_u256(&minus_s_g2.0);
-        let minus_s_g2_0_ptr = rd_ptr + 0x100;
-        let minus_s_g2_1 = hex_encode_u256(&minus_s_g2.1);
-        let minus_s_g2_1_ptr = rd_ptr + 0x120;
-        let minus_s_g2_2 = hex_encode_u256(&minus_s_g2.2);
-        let minus_s_g2_2_ptr = rd_ptr + 0x140;
-        let minus_s_g2_3 = hex_encode_u256(&minus_s_g2.3);
-        let minus_s_g2_3_ptr = rd_ptr + 0x160;
-        let code = format!(
-            "mstore({minus_s_g2_0_ptr:#x}, {minus_s_g2_0})
-            mstore({minus_s_g2_1_ptr:#x}, {minus_s_g2_1})
-            mstore({minus_s_g2_2_ptr:#x}, {minus_s_g2_2})
-            mstore({minus_s_g2_3_ptr:#x}, {minus_s_g2_3})"
-        );
-        self.code.borrow_mut().runtime_append(code);
+        self.allocate(BLS_G2_BYTES);
+        let minus_s_g2_code = minus_s_g2
+            .iter()
+            .enumerate()
+            .map(|(idx, word)| {
+                format!(
+                    "mstore({:#x}, {})",
+                    rd_ptr + (BLS_G1_BYTES + BLS_G2_BYTES) + BLS_G1_BYTES + idx * 0x20,
+                    hex_encode_u256(word)
+                )
+            })
+            .join("\n");
+        self.code.borrow_mut().runtime_append(minus_s_g2_code);
+
         self.staticcall(Precompiled::Bn254Pairing, rd_ptr, rd_ptr);
         let code = format!("success := and(eq(mload({rd_ptr:#x}), 1), success)");
         self.code.borrow_mut().runtime_append(code);
