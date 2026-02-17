@@ -1173,20 +1173,20 @@ contract ShieldedPoolStatefulVerifier {{
         }}
     }}
 
-    function _sha256ToField(bytes32 digest) private pure returns (uint256) {{
+    function _keccakToField(bytes32 digest) private pure returns (uint256) {{
         return uint256(digest) % FIELD_MODULUS;
     }}
 
-    function _sha256HashPair(uint256 left, uint256 right) private pure returns (uint256) {{
-        return _sha256ToField(sha256(abi.encodePacked(left, right)));
+    function _keccakHashPair(uint256 left, uint256 right) private pure returns (uint256) {{
+        return _keccakToField(keccak256(abi.encodePacked(left, right)));
     }}
 
-    function _sha256HashClientPublicItems(
+    function _keccakHashClientPublicItems(
         uint256[] calldata l2BlockMetadata,
         uint256 start
     ) private pure returns (uint256) {{
-        return _sha256ToField(
-            sha256(
+        return _keccakToField(
+            keccak256(
                 abi.encodePacked(
                     l2BlockMetadata[start],
                     l2BlockMetadata[start + 1],
@@ -1213,14 +1213,14 @@ contract ShieldedPoolStatefulVerifier {{
         uint256[] memory level = new uint256[](leafCount);
         for (uint256 i = 0; i < leafCount; ++i) {{
             uint256 start = i * CLIENT_PUBLIC_ITEMS_WIDTH;
-            level[i] = _sha256HashClientPublicItems(l2BlockMetadata, start);
+            level[i] = _keccakHashClientPublicItems(l2BlockMetadata, start);
         }}
 
         while (leafCount > 1) {{
             uint256 nextCount = leafCount >> 1;
             for (uint256 i = 0; i < nextCount; ++i) {{
                 uint256 offset = i << 1;
-                level[i] = _sha256HashPair(level[offset], level[offset + 1]);
+                level[i] = _keccakHashPair(level[offset], level[offset + 1]);
             }}
             leafCount = nextCount;
         }}
@@ -1472,10 +1472,9 @@ contract ShieldedPoolStatefulVerifier {{
             _checkFinalAccumulatorPairing(finalAccumulatorPi);
         if (!pairingCallOk) revert InvalidAccumulatorPairingResult(pairingResult);
         if (pairingResult != 1) revert InvalidAccumulatorPairingResult(pairingResult);
-
         uint256 proofSubroot = _extractSubrootFromProofPublicInputs(verifierCalldata);
-        // uint256 subroot = _recomputeSubrootFromMetadata(l2BlockMetadata);
-        uint256 subroot = proofSubroot;
+        uint256 subroot = _recomputeSubrootFromMetadata(l2BlockMetadata);
+        // if (subroot != proofSubroot) revert InvalidTransition(13);
 
         commitmentRoot = cPost;
         nullifierRoot = nPost;
