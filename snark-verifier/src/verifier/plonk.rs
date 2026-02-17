@@ -28,7 +28,9 @@ mod proof;
 pub(crate) mod protocol;
 
 pub use proof::PlonkProof;
-pub use protocol::PlonkProtocol;
+pub use protocol::{
+    CommonPolynomial, Expression, PlonkProtocol, Query, QuotientChunkBase, QuotientPolynomial,
+};
 
 /// Verifier that verifies the cheap part of PLONK and ouput the accumulator.
 #[derive(Debug)]
