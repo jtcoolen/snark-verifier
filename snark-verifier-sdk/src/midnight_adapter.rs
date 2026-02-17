@@ -388,6 +388,7 @@ impl MidnightProofBundle {
             MidnightProtocolBuilder::new(&self.vk, num_instance, committed_instance_count);
         builder.build()
     }
+
     fn decode_midnight_s_g2(&self) -> Result<G2Projective> {
         let mut encoded = Vec::new();
         self.params.write(&mut encoded, SerdeFormat::Processed)?;
@@ -578,6 +579,7 @@ fn halo_g1_to_midnight_projective(point: HaloG1Affine) -> Result<G1Projective> {
         .ok_or_else(|| anyhow!("failed to map halo G1 coordinates into midnight G1"))?;
     Ok(affine.to_curve())
 }
+
 #[derive(Clone, Debug)]
 struct MidnightSnarkTranscript {
     inner: CircuitTranscript<Blake2bState>,
@@ -648,6 +650,7 @@ impl SvTranscriptRead<HaloG1Affine, NativeLoader> for MidnightSnarkTranscript {
         midnight_g1_to_halo_affine(value).map_err(Self::map_conversion_error)
     }
 }
+
 #[derive(Clone, Debug)]
 struct MidnightProtocolBuilder<'a> {
     vk: &'a VerifyingKey<Fq, KZGCommitmentScheme<Bls12>>,
@@ -1289,6 +1292,7 @@ impl<'a> MidnightProtocolBuilder<'a> {
         })
     }
 }
+
 /// Dummy circuit type to satisfy VK deserialization. We don't use params.
 #[derive(Clone, Debug)]
 struct DummyCircuit;
