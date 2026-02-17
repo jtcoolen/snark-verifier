@@ -32,14 +32,13 @@ pub trait BigPrimeField: ScalarField {
 #[cfg(feature = "halo2-axiom")]
 impl<F> BigPrimeField for F
 where
-    F: ScalarField + From<[u64; 4]>, // Assume [u64; 4] is little-endian. We only implement ScalarField when this is true.
+    F: ScalarField,
 {
     #[inline(always)]
     fn from_u64_digits(val: &[u64]) -> Self {
-        debug_assert!(val.len() <= 4);
-        let mut raw = [0u64; 4];
-        raw[..val.len()].copy_from_slice(val);
-        Self::from(raw)
+        // `ScalarField::from_bytes_le` handles field-specific canonicalization/width.
+        let bytes = val.iter().flat_map(|digit| digit.to_le_bytes()).collect::<Vec<_>>();
+        Self::from_bytes_le(&bytes)
     }
 }
 
@@ -387,7 +386,7 @@ mod scalar_field_impls {
     #[cfg(feature = "halo2-pse")]
     use crate::ff::PrimeField;
     use crate::halo2_proofs::halo2curves::{
-        bls12_381::{Bls12, Fq as blsFq, Fr as blsFr},
+        bls12_381::{Fq as blsFq, Fr as blsFr},
         bn256::{Fq as bn254Fq, Fr as bn254Fr},
         secp256k1::{Fp as secpFp, Fq as secpFq},
     };
@@ -429,6 +428,7 @@ mod scalar_field_impls {
 
     #[cfg(feature = "halo2-axiom")]
     #[macro_export]
+    /// Implements `ScalarField` for 6-limb scalar field representations.
     macro_rules! impl_scalar_field_6_limbs {
         ($field:ident) => {
             impl ScalarField for $field {
