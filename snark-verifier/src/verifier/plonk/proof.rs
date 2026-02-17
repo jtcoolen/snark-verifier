@@ -127,10 +127,6 @@ where
         }
 
         if committed_count > 0 {
-            full_committed_instances.extend(
-                (committed_count..protocol.num_instance.len())
-                    .map(|_| loader.ec_point_load_zero()),
-            );
             Ok(Some(full_committed_instances))
         } else {
             Ok(None)
@@ -172,7 +168,7 @@ where
             return Err(Error::InvalidInstances);
         }
 
-        let committed_instances = Self::build_committed_instances(
+        let mut committed_instances = Self::build_committed_instances(
             protocol,
             instances,
             committed_instance_commitments,
@@ -214,6 +210,15 @@ where
             &Self::empty_queries(protocol),
             transcript,
         )?;
+
+        if protocol.committed_instance_count > 0 {
+            if let Some(committed_instances) = committed_instances.as_mut() {
+                committed_instances.extend(
+                    (protocol.committed_instance_count..protocol.num_instance.len())
+                        .map(|_| transcript.loader().ec_point_load_zero()),
+                );
+            }
+        }
 
         let old_accumulators = protocol
             .accumulator_indices
