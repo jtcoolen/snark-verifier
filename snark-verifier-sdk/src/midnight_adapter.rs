@@ -215,9 +215,13 @@ impl MidnightProofBundle {
     }
 
     fn to_snark_protocol(&self) -> Result<PlonkProtocol<HaloG1Affine>> {
-        let num_instance =
-            self.instances_as_halo_fr()?.into_iter().map(|column| column.len()).collect_vec();
-        let builder = MidnightProtocolBuilder::new(&self.vk, num_instance);
+        let committed_instance_count = self.committed_instance_count();
+        let num_instance = self
+            .full_instances_as_halo_fr()?
+            .into_iter()
+            .map(|column| column.len())
+            .collect_vec();
+        let builder = MidnightProtocolBuilder::new(&self.vk, num_instance, committed_instance_count);
         builder.build()
     }
     fn decode_midnight_s_g2(&self) -> Result<G2Projective> {
@@ -449,6 +453,7 @@ struct MidnightProtocolBuilder<'a> {
     vk: &'a VerifyingKey<Fq, KZGCommitmentScheme<Bls12>>,
     cs: &'a midnight_proofs::plonk::ConstraintSystem<Fq>,
     num_instance: Vec<usize>,
+    committed_instance_count: usize,
     num_advice: Vec<usize>,
     num_challenge: Vec<usize>,
     advice_index: Vec<usize>,
@@ -461,7 +466,11 @@ struct MidnightProtocolBuilder<'a> {
 }
 
 impl<'a> MidnightProtocolBuilder<'a> {
-    fn new(vk: &'a VerifyingKey<Fq, KZGCommitmentScheme<Bls12>>, num_instance: Vec<usize>) -> Self {
+    fn new(
+        vk: &'a VerifyingKey<Fq, KZGCommitmentScheme<Bls12>>,
+        num_instance: Vec<usize>,
+        committed_instance_count: usize,
+    ) -> Self {
         let cs = vk.cs();
 
         let num_phase = cs.advice_column_phase().iter().max().copied().unwrap_or_default() as usize + 1;
@@ -495,6 +504,7 @@ impl<'a> MidnightProtocolBuilder<'a> {
             vk,
             cs,
             num_instance,
+            committed_instance_count,
             num_advice,
             num_challenge,
             advice_index,
@@ -515,6 +525,13 @@ impl<'a> MidnightProtocolBuilder<'a> {
                 self.num_instance.len()
             );
         }
+        if self.committed_instance_count > self.num_instance.len() {
+            bail!(
+                "committed instance count {} exceeds total instance columns {}",
+                self.committed_instance_count,
+                self.num_instance.len()
+            );
+        }
         let k = self.vk.get_domain().k() as usize;
         let gen = midnight_fq_to_halo_fr(self.vk.get_domain().get_omega())?;
         let domain = Domain::new(k, gen);
@@ -527,12 +544,14 @@ impl<'a> MidnightProtocolBuilder<'a> {
             .cloned()
             .map(midnight_g1_to_halo_affine)
             .collect::<Result<Vec<_>>>()?;
+        let committed_instance_queries = self.committed_instance_queries();
         let advice_queries = self.advice_queries()?;
         let fixed_queries = self.fixed_queries();
 
         let evaluations = self
-            .advice_queries()?
+            .committed_instance_queries()
             .into_iter()
+            .chain(advice_queries.clone())
             .chain(fixed_queries.clone())
             .chain(self.random_query())
             .chain(self.permutation_fixed_queries())
@@ -540,8 +559,9 @@ impl<'a> MidnightProtocolBuilder<'a> {
             .chain(self.lookup_queries(true))
             .collect_vec();
 
-        let queries = advice_queries
+        let queries = committed_instance_queries
             .into_iter()
+            .chain(advice_queries)
             .chain(self.permutation_z_queries(false))
             .chain(self.lookup_queries(false))
             .chain(fixed_queries)
@@ -559,8 +579,8 @@ impl<'a> MidnightProtocolBuilder<'a> {
             num_instance: self.num_instance.clone(),
             num_witness: self.num_witness(),
             num_challenge: self.num_challenge_with_system(),
-            committed_instance_count: 0,
-            hash_instance_lengths: false,
+            committed_instance_count: self.committed_instance_count,
+            hash_instance_lengths: true,
             trailing_challenges: 0,
             extra_commitments: 0,
             evaluations,
@@ -702,6 +722,15 @@ impl<'a> MidnightProtocolBuilder<'a> {
                 Ok(self.convert_expression(a)? * midnight_fq_to_halo_fr(*scalar)?)
             }
         }
+    }
+
+    fn committed_instance_queries(&self) -> Vec<Query> {
+        self.cs
+            .instance_queries()
+            .iter()
+            .filter(|(column, _)| column.index() < self.committed_instance_count)
+            .map(|(column, rotation)| self.query(Any::Instance, column.index(), *rotation))
+            .collect()
     }
 
     fn advice_queries(&self) -> Result<Vec<Query>> {
