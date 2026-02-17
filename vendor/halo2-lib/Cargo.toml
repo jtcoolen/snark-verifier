@@ -43,3 +43,4 @@ halo2-ecc = { path = "../halo2-lib/halo2-ecc" }
 [patch.crates-io]
 halo2-base = { path = "../halo2-lib/halo2-base" }
 halo2-ecc = { path = "../halo2-lib/halo2-ecc" }
+halo2curves-axiom = { git = "https://github.com/jtcoolen/halo2curves.git", rev = "edeb29e7964f1d24bb3bc0d2a5f9417de92a572a" }

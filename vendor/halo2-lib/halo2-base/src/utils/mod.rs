@@ -427,6 +427,39 @@ mod scalar_field_impls {
         };
     }
 
+    #[cfg(feature = "halo2-axiom")]
+    #[macro_export]
+    macro_rules! impl_scalar_field_6_limbs {
+        ($field:ident) => {
+            impl ScalarField for $field {
+                #[inline(always)]
+                fn to_u64_limbs(self, num_limbs: usize, bit_len: usize) -> Vec<u64> {
+                    // Basically same as `to_repr` but does not go further into bytes
+                    let tmp: [u64; 6] = self.into();
+                    decompose_u64_digits_to_limbs(tmp, num_limbs, bit_len)
+                }
+
+                #[inline(always)]
+                fn to_bytes_le(&self) -> Vec<u8> {
+                    let tmp: [u64; 6] = (*self).into();
+                    tmp.iter().flat_map(|x| x.to_le_bytes()).collect()
+                }
+
+                #[inline(always)]
+                fn get_lower_32(&self) -> u32 {
+                    let tmp: [u64; 6] = (*self).into();
+                    tmp[0] as u32
+                }
+
+                #[inline(always)]
+                fn get_lower_64(&self) -> u64 {
+                    let tmp: [u64; 6] = (*self).into();
+                    tmp[0]
+                }
+            }
+        };
+    }
+
     /// To ensure `ScalarField` is only implemented for `ff:Field` where `Repr` is little endian, we use the following macro
     /// to implement the trait for each field.
     #[cfg(feature = "halo2-pse")]
@@ -455,7 +488,7 @@ mod scalar_field_impls {
     impl_scalar_field!(secpFp);
     impl_scalar_field!(secpFq);
     impl_scalar_field!(blsFr);
-    //impl_scalar_field!(blsFq);
+    impl_scalar_field_6_limbs!(blsFq);
 }
 
 /// Module for reading parameters for Halo2 proving system from the file system.
