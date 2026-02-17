@@ -146,15 +146,16 @@ mod evm {
         let x = coordinates.x().to_repr();
         let y = coordinates.y().to_repr();
 
-        // Keep the existing c1,c0 ordering expected by precompiles:
-        // second half first, then first half.
         let x = x.as_ref();
         let y = y.as_ref();
         assert_eq!(x.len() % 2, 0);
         assert_eq!(y.len() % 2, 0);
         let x_mid = x.len() / 2;
         let y_mid = y.len() / 2;
-        [&x[x_mid..], &x[..x_mid], &y[y_mid..], &y[..y_mid]]
+        // EIP-2537 expects Fp2 coordinates in (c0, c1) order.
+        // `to_repr()` for Fp2 in halo2curves is `c0 || c1` (little-endian bytes per component).
+        let components = [&x[..x_mid], &x[x_mid..], &y[..y_mid], &y[y_mid..]];
+        components
             .into_iter()
             .flat_map(le_component_to_padded_words)
             .collect()
