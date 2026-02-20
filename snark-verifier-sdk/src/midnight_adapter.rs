@@ -368,6 +368,76 @@ fn halo_g1_to_midnight_projective(point: HaloG1Affine) -> Result<G1Projective> {
         .ok_or_else(|| anyhow!("failed to map halo G1 coordinates into midnight G1"))?;
     Ok(affine.to_curve())
 }
+#[derive(Clone, Debug)]
+struct MidnightSnarkTranscript {
+    inner: CircuitTranscript<Blake2bState>,
+    read_ec_points: usize,
+    read_scalars: usize,
+}
+
+impl MidnightSnarkTranscript {
+    fn init_from_bytes(bytes: &[u8]) -> Self {
+        Self {
+            inner: CircuitTranscript::<Blake2bState>::init_from_bytes(bytes),
+            read_ec_points: 0,
+            read_scalars: 0,
+        }
+    }
+
+    fn map_io_error(err: io::Error) -> SnarkVerifierError {
+        SnarkVerifierError::Transcript(err.kind(), err.to_string())
+    }
+
+    fn map_conversion_error(err: anyhow::Error) -> SnarkVerifierError {
+        SnarkVerifierError::Transcript(io::ErrorKind::InvalidData, err.to_string())
+    }
+}
+
+impl SvTranscript<HaloG1Affine, NativeLoader> for MidnightSnarkTranscript {
+    fn loader(&self) -> &NativeLoader {
+        &snark_verifier::loader::native::LOADER
+    }
+
+    fn squeeze_challenge(&mut self) -> HaloFr {
+        let challenge: Fq = self.inner.squeeze_challenge();
+        midnight_fq_to_halo_fr(challenge).expect("midnight challenge must map to halo scalar")
+    }
+
+    fn common_ec_point(&mut self, ec_point: &HaloG1Affine) -> Result<(), SnarkVerifierError> {
+        let point =
+            halo_g1_to_midnight_projective(*ec_point).map_err(Self::map_conversion_error)?;
+        self.inner.common(&point).map_err(Self::map_io_error)
+    }
+
+    fn common_scalar(&mut self, scalar: &HaloFr) -> Result<(), SnarkVerifierError> {
+        let scalar = halo_fr_to_midnight_fq(*scalar).map_err(Self::map_conversion_error)?;
+        self.inner.common(&scalar).map_err(Self::map_io_error)
+    }
+}
+
+impl SvTranscriptRead<HaloG1Affine, NativeLoader> for MidnightSnarkTranscript {
+    fn read_scalar(&mut self) -> Result<HaloFr, SnarkVerifierError> {
+        let value: Fq = self.inner.read().map_err(|err| {
+            SnarkVerifierError::Transcript(
+                err.kind(),
+                format!("scalar read #{} failed: {}", self.read_scalars, err),
+            )
+        })?;
+        self.read_scalars += 1;
+        midnight_fq_to_halo_fr(value).map_err(Self::map_conversion_error)
+    }
+
+    fn read_ec_point(&mut self) -> Result<HaloG1Affine, SnarkVerifierError> {
+        let value: G1Projective = self.inner.read().map_err(|err| {
+            SnarkVerifierError::Transcript(
+                err.kind(),
+                format!("ec-point read #{} failed: {}", self.read_ec_points, err),
+            )
+        })?;
+        self.read_ec_points += 1;
+        midnight_g1_to_halo_affine(value).map_err(Self::map_conversion_error)
+    }
+}
 /// Dummy circuit type to satisfy VK deserialization. We don't use params.
 #[derive(Clone, Debug)]
 struct DummyCircuit;
