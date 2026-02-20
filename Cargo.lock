@@ -202,6 +202,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5192cca8006f1fd4f7237516f40fa183bb07f8fbdfedaa0036de5ea9b0b45e78"
 
 [[package]]
+name = "anyhow"
+version = "1.0.101"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f0e0fee31ef5ed1ba1316088939cea399010ed7731dba877ed44aeb407a75ea"
+
+[[package]]
 name = "ark-bls12-381"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -586,6 +592,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "bincode"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36eaf5d7b090263e8150820482d5d93cd964a81e4019913c972f4edcc6edb740"
+dependencies = [
+ "bincode_derive",
+ "serde",
+ "unty",
+]
+
+[[package]]
+name = "bincode_derive"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf95709a440f45e986983918d0e8a1f30a9b1df04918fc828670606804ac3c09"
+dependencies = [
+ "virtue",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -638,6 +664,22 @@ dependencies = [
  "radium",
  "tap",
  "wyz",
+]
+
+[[package]]
+name = "blake2b_halo2"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba44fa3e70871c2bc00d44f08c95be68145ae28a60de8182e649eee2f17a872b"
+dependencies = [
+ "ff",
+ "hex",
+ "midnight-curves",
+ "midnight-proofs",
+ "num-bigint",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1522,8 +1564,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "wasi",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1579,7 +1623,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63"
 dependencies = [
  "ff",
+ "rand 0.8.5",
  "rand_core 0.6.4",
+ "rand_xorshift 0.3.0",
  "subtle",
 ]
 
@@ -1604,7 +1650,7 @@ dependencies = [
  "crossbeam",
  "ff",
  "group",
- "halo2curves-axiom",
+ "halo2curves-axiom 0.7.2 (git+https://github.com/jtcoolen/halo2curves.git?rev=edeb29e7964f1d24bb3bc0d2a5f9417de92a572a)",
  "itertools 0.11.0",
  "maybe-rayon",
  "pairing",
@@ -1620,6 +1666,7 @@ dependencies = [
 name = "halo2-base"
 version = "0.5.1"
 dependencies = [
+ "ark-std 0.3.0",
  "getset",
  "halo2-axiom",
  "halo2_proofs",
@@ -1630,6 +1677,7 @@ dependencies = [
  "num-integer",
  "num-traits",
  "poseidon-primitives",
+ "rand 0.8.5",
  "rand_chacha 0.3.1",
  "rayon",
  "rustc-hash 1.1.0",
@@ -1640,6 +1688,7 @@ dependencies = [
 [[package]]
 name = "halo2-ecc"
 version = "0.5.1"
+source = "git+https://github.com/jtcoolen/halo2-lib.git?rev=f56347dbc1162d11ba1a52eb2e5501f93445a75d#f56347dbc1162d11ba1a52eb2e5501f93445a75d"
 dependencies = [
  "halo2-base",
  "itertools 0.11.0",
@@ -1691,7 +1740,7 @@ dependencies = [
  "rand_core 0.6.4",
  "rayon",
  "serde",
- "serde_arrays",
+ "serde_arrays 0.1.0",
  "static_assertions",
  "subtle",
 ]
@@ -1716,11 +1765,52 @@ dependencies = [
  "rand_core 0.6.4",
  "rayon",
  "serde",
- "serde_arrays",
+ "serde_arrays 0.1.0",
  "sha2 0.10.9",
  "static_assertions",
  "subtle",
  "unroll",
+]
+
+[[package]]
+name = "halo2curves-axiom"
+version = "0.7.2"
+source = "git+https://github.com/jtcoolen/halo2curves.git#bb28864cf5c3d3e76824367a585b66b6f2da44fd"
+dependencies = [
+ "blake2b_simd",
+ "digest 0.10.7",
+ "ff",
+ "group",
+ "hex",
+ "lazy_static",
+ "num-bigint",
+ "num-traits",
+ "pairing",
+ "pasta_curves",
+ "paste",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "rayon",
+ "serde",
+ "serde_arrays 0.1.0",
+ "sha2 0.10.9",
+ "static_assertions",
+ "subtle",
+ "unroll",
+]
+
+[[package]]
+name = "halo2derive"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0d74794c1b24716c5abf5d6bfd98ee3c2d346bc67da374ba21d80adb38c336c"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -2116,6 +2206,98 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "744133e4a0e0a658e1374cf3bf8e415c4052a15a111acd372764c55b4177d490"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "midnight-circuits"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff204b6d67ebe408c695751e4d8e078c6f8b3e178f5cb5f55b2615b08070a4dc"
+dependencies = [
+ "base64 0.13.1",
+ "blake2b_halo2",
+ "ff",
+ "group",
+ "lazy_static",
+ "midnight-curves",
+ "midnight-proofs",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "rand 0.8.5",
+ "rustc-hash 2.1.1",
+ "sha2 0.10.9",
+ "sha3-circuit",
+ "subtle",
+]
+
+[[package]]
+name = "midnight-curves"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71df41292a1fd7796bf6c0c6eff7ad717d628406a59a79240e68579716c3566a"
+dependencies = [
+ "bitvec",
+ "blst",
+ "byte-slice-cast",
+ "digest 0.10.7",
+ "ff",
+ "getrandom 0.2.17",
+ "group",
+ "halo2derive",
+ "hex",
+ "lazy_static",
+ "num-bigint",
+ "pairing",
+ "paste",
+ "rand_core 0.6.4",
+ "rayon",
+ "serde",
+ "serde_arrays 0.2.0",
+ "sha2 0.10.9",
+ "subtle",
+]
+
+[[package]]
+name = "midnight-proofs"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c977f57dc14235eb02ea9579f6bee1996b0edd50efaa5ab7ad55cb87966c0d7d"
+dependencies = [
+ "blake2b_simd",
+ "ff",
+ "getrandom 0.2.17",
+ "group",
+ "midnight-curves",
+ "num-bigint",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.4",
+ "rayon",
+ "serde",
+ "serde_derive",
+ "tracing",
+]
+
+[[package]]
+name = "midnight-zk-stdlib"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0252a1e687f530a355d89bd6d4bce99d8361eef8abe6dff5b3b864fe8e426901"
+dependencies = [
+ "base64 0.13.1",
+ "bincode 2.0.1",
+ "blake2b_halo2",
+ "blake2b_simd",
+ "ff",
+ "group",
+ "midnight-circuits",
+ "midnight-curves",
+ "midnight-proofs",
+ "num-bigint",
+ "num-traits",
+ "rand 0.8.5",
+ "sha2 0.10.9",
+ "sha3-circuit",
 ]
 
 [[package]]
@@ -2739,9 +2921,9 @@ dependencies = [
 
 [[package]]
 name = "rapidhash"
-version = "4.2.2"
+version = "4.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71ec30b38a417407efe7676bad0ca6b78f995f810185ece9af3bd5dc561185a9"
+checksum = "84816e4c99c467e92cf984ee6328caa976dfecd33a673544489d79ca2caaefe5"
 dependencies = [
  "rustversion",
 ]
@@ -3305,6 +3487,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_arrays"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94a16b99c5ea4fe3daccd14853ad260ec00ea043b2708d1fd1da3106dcd8d9df"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_core"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3454,6 +3645,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha3-circuit"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be83e5373c70fbe71d6aa678da6d139029a497faccd1c693f393526fe0195101"
+dependencies = [
+ "blake2b_simd",
+ "ff",
+ "midnight-curves",
+ "midnight-proofs",
+ "num-bigint",
+ "rand 0.8.5",
+]
+
+[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3520,6 +3725,7 @@ dependencies = [
  "crossterm 0.25.0",
  "halo2-base",
  "halo2-ecc",
+ "halo2curves-axiom 0.7.2 (git+https://github.com/jtcoolen/halo2curves.git)",
  "hex",
  "itertools 0.11.0",
  "lazy_static",
@@ -3543,17 +3749,24 @@ dependencies = [
 name = "snark-verifier-sdk"
 version = "0.2.3"
 dependencies = [
+ "anyhow",
  "ark-std 0.3.0",
- "bincode",
+ "bincode 1.3.3",
+ "blake2b_simd",
  "criterion",
  "criterion-macro",
  "crossterm 0.25.0",
  "ethereum-types",
+ "ff",
  "getset",
  "halo2-base",
  "hex",
  "itertools 0.11.0",
  "lazy_static",
+ "midnight-circuits",
+ "midnight-curves",
+ "midnight-proofs",
+ "midnight-zk-stdlib",
  "num-bigint",
  "num-integer",
  "num-traits",
@@ -3565,6 +3778,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with 2.3.3",
+ "sha3 0.10.8",
  "snark-verifier",
 ]
 
@@ -3968,6 +4182,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "unty"
+version = "0.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae"
+
+[[package]]
 name = "uuid"
 version = "1.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3988,6 +4208,12 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "virtue"
+version = "0.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "051eb1abcf10076295e815102942cc58f9d5e3b4560e46e53c21e8ff6f3af7b1"
 
 [[package]]
 name = "wait-timeout"
