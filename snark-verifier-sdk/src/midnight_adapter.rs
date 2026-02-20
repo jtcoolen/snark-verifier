@@ -22,12 +22,16 @@ use halo2_base::halo2_proofs::halo2curves::{
     group::{prime::PrimeCurveAffine, Curve},
     CurveAffine as HaloCurveAffine,
 };
+use itertools::Itertools;
 use midnight_curves::{
     bls12_381::Fp2 as MidnightFp2, Bls12, CurveAffine as MidnightCurveAffine, Fp as MidnightFp, Fq,
     G1Affine as MidnightG1Affine, G1Projective, G2Projective,
 };
 use midnight_proofs::{
-    plonk::{prepare, Any, Expression as MidnightExpression, FirstPhase, SecondPhase, ThirdPhase, VerifyingKey},
+    plonk::{
+        prepare, Any, Expression as MidnightExpression, FirstPhase, SecondPhase, ThirdPhase,
+        VerifyingKey,
+    },
     poly::commitment::{Guard, PolynomialCommitmentScheme},
     poly::kzg::{params::ParamsVerifierKZG, KZGCommitmentScheme},
     transcript::{CircuitTranscript, Transcript as MidnightTranscript},
@@ -52,8 +56,17 @@ use snark_verifier::{
     },
     Error as SnarkVerifierError,
 };
-use itertools::Itertools;
+#[cfg(feature = "loader_evm")]
+use snark_verifier::{
+    loader::{
+        evm::{compile_solidity, encode_calldata, EvmLoader},
+        EcPointLoader,
+    },
+    system::halo2::transcript::evm::EvmTranscript,
+};
 use std::io;
+#[cfg(feature = "loader_evm")]
+use std::rc::Rc;
 
 type MidnightCommitment =
     <KZGCommitmentScheme<Bls12> as PolynomialCommitmentScheme<Fq>>::Commitment;
@@ -82,6 +95,16 @@ impl MidnightProofBundle {
         Self::new_with_committed_instances(params, vk, proof, vec![], instances)
     }
 
+    /// Construct a bundle without verifying the proof bytes.
+    pub fn new_unchecked(
+        params: ParamsVerifierKZG<Bls12>,
+        vk: VerifyingKey<Fq, KZGCommitmentScheme<Bls12>>,
+        proof: Vec<u8>,
+        instances: Vec<Vec<Fq>>,
+    ) -> Result<Self> {
+        Self::new_unchecked_with_committed_instances(params, vk, proof, vec![], instances)
+    }
+
     /// Construct a bundle with committed and non-committed public instances.
     pub fn new_with_committed_instances(
         params: ParamsVerifierKZG<Bls12>,
@@ -90,11 +113,29 @@ impl MidnightProofBundle {
         committed_instances: Vec<MidnightCommitment>,
         instances: Vec<Vec<Fq>>,
     ) -> Result<Self> {
-        let committed_instances =
-            normalize_committed_instances(&vk, committed_instances, instances.len())?;
-        let bundle = MidnightProofBundle { params, vk, committed_instances, instances, proof };
+        let bundle = Self::new_unchecked_with_committed_instances(
+            params,
+            vk,
+            proof,
+            committed_instances,
+            instances,
+        )?;
         bundle.verify()?;
         Ok(bundle)
+    }
+
+    /// Construct a bundle with committed and non-committed public instances
+    /// without verifying the proof bytes.
+    pub fn new_unchecked_with_committed_instances(
+        params: ParamsVerifierKZG<Bls12>,
+        vk: VerifyingKey<Fq, KZGCommitmentScheme<Bls12>>,
+        proof: Vec<u8>,
+        committed_instances: Vec<MidnightCommitment>,
+        instances: Vec<Vec<Fq>>,
+    ) -> Result<Self> {
+        let committed_instances =
+            normalize_committed_instances(&vk, committed_instances, instances.len())?;
+        Ok(MidnightProofBundle { params, vk, committed_instances, instances, proof })
     }
 
     /// Deserialize from bytes (VK encoded with RawBytesUnchecked).
@@ -118,6 +159,41 @@ impl MidnightProofBundle {
         let vk =
             VerifyingKey::from_bytes::<DummyCircuit>(vk_bytes, SerdeFormat::RawBytesUnchecked, ())?;
         Self::new_with_committed_instances(params, vk, proof, committed_instances, instances)
+    }
+
+    /// Deserialize a bundle from bytes without verifying the proof bytes.
+    pub fn from_bytes_unchecked(
+        params: ParamsVerifierKZG<Bls12>,
+        vk_bytes: &[u8],
+        proof: Vec<u8>,
+        instances: Vec<Vec<Fq>>,
+    ) -> Result<Self> {
+        Self::from_bytes_unchecked_with_committed_instances(
+            params,
+            vk_bytes,
+            proof,
+            vec![],
+            instances,
+        )
+    }
+
+    /// Deserialize from bytes with committed instances without verifying the proof bytes.
+    pub fn from_bytes_unchecked_with_committed_instances(
+        params: ParamsVerifierKZG<Bls12>,
+        vk_bytes: &[u8],
+        proof: Vec<u8>,
+        committed_instances: Vec<MidnightCommitment>,
+        instances: Vec<Vec<Fq>>,
+    ) -> Result<Self> {
+        let vk =
+            VerifyingKey::from_bytes::<DummyCircuit>(vk_bytes, SerdeFormat::RawBytesUnchecked, ())?;
+        Self::new_unchecked_with_committed_instances(
+            params,
+            vk,
+            proof,
+            committed_instances,
+            instances,
+        )
     }
 
     /// Parse proof and derive Midnight's KZG verification guard.
@@ -190,6 +266,36 @@ impl MidnightProofBundle {
         let committed_instances = self.committed_instances_as_halo_points()?;
 
         let mut transcript = MidnightSnarkTranscript::init_from_bytes(&self.proof);
+        let proof =
+            PlonkProof::<HaloG1Affine, NativeLoader, HaloAs>::read_with_committed_instances::<
+                _,
+                LimbsEncoding<{ crate::LIMBS }, { crate::BITS }>,
+            >(&svk, &protocol, &instances, Some(&committed_instances), &mut transcript)
+            .map_err(|e| {
+                anyhow!("failed to parse midnight proof into snark-verifier proof: {e:?}")
+            })?;
+
+        <crate::PlonkVerifier<HaloAs> as SnarkVerifier<HaloG1Affine, NativeLoader>>::verify(
+            &dk, &protocol, &instances, &proof,
+        )
+        .map_err(|e| anyhow!("snark-verifier full verification failed: {e:?}"))?;
+
+        Ok(())
+    }
+
+    /// Fully verify through snark-verifier using EVM transcript semantics.
+    ///
+    /// The proof bytes must be produced with `MidnightEvmHash`.
+    #[cfg(feature = "loader_evm")]
+    pub fn verify_with_snark_verifier_evm_transcript(&self) -> Result<()> {
+        let protocol = self.to_snark_protocol()?;
+        let dk = self.snark_deciding_key()?;
+        let svk = dk.svk();
+        let instances = self.full_instances_as_halo_fr()?;
+        let committed_instances = self.committed_instances_as_halo_points()?;
+
+        let mut transcript =
+            EvmTranscript::<HaloG1Affine, NativeLoader, _, _>::new(self.proof.as_slice());
         let proof = PlonkProof::<HaloG1Affine, NativeLoader, HaloAs>::read_with_committed_instances::<
             _,
             LimbsEncoding<{ crate::LIMBS }, { crate::BITS }>,
@@ -200,12 +306,14 @@ impl MidnightProofBundle {
             Some(&committed_instances),
             &mut transcript,
         )
-        .map_err(|e| anyhow!("failed to parse midnight proof into snark-verifier proof: {e:?}"))?;
+        .map_err(|e| {
+            anyhow!("failed to parse midnight EVM-transcript proof into snark-verifier proof: {e:?}")
+        })?;
 
         <crate::PlonkVerifier<HaloAs> as SnarkVerifier<HaloG1Affine, NativeLoader>>::verify(
             &dk, &protocol, &instances, &proof,
         )
-        .map_err(|e| anyhow!("snark-verifier full verification failed: {e:?}"))?;
+        .map_err(|e| anyhow!("snark-verifier EVM-transcript verification failed: {e:?}"))?;
 
         Ok(())
     }
