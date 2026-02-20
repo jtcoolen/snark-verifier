@@ -243,9 +243,13 @@ impl MidnightProofBundle {
     }
 
     fn to_snark_protocol(&self) -> Result<PlonkProtocol<HaloG1Affine>> {
-        let num_instance =
-            self.instances_as_halo_fr()?.into_iter().map(|column| column.len()).collect_vec();
-        let builder = MidnightProtocolBuilder::new(&self.vk, num_instance);
+        let committed_instance_count = self.committed_instance_count();
+        let num_instance = self
+            .full_instances_as_halo_fr()?
+            .into_iter()
+            .map(|column| column.len())
+            .collect_vec();
+        let builder = MidnightProtocolBuilder::new(&self.vk, num_instance, committed_instance_count);
         builder.build()
     }
     fn decode_midnight_s_g2(&self) -> Result<G2Projective> {
@@ -477,6 +481,7 @@ struct MidnightProtocolBuilder<'a> {
     vk: &'a VerifyingKey<Fq, KZGCommitmentScheme<Bls12>>,
     cs: &'a midnight_proofs::plonk::ConstraintSystem<Fq>,
     num_instance: Vec<usize>,
+    committed_instance_count: usize,
     num_advice: Vec<usize>,
     num_challenge: Vec<usize>,
     advice_index: Vec<usize>,
@@ -489,7 +494,11 @@ struct MidnightProtocolBuilder<'a> {
 }
 
 impl<'a> MidnightProtocolBuilder<'a> {
-    fn new(vk: &'a VerifyingKey<Fq, KZGCommitmentScheme<Bls12>>, num_instance: Vec<usize>) -> Self {
+    fn new(
+        vk: &'a VerifyingKey<Fq, KZGCommitmentScheme<Bls12>>,
+        num_instance: Vec<usize>,
+        committed_instance_count: usize,
+    ) -> Self {
         let cs = vk.cs();
 
         let num_phase = cs.advice_column_phase().iter().max().copied().unwrap_or_default() as usize + 1;
@@ -523,6 +532,7 @@ impl<'a> MidnightProtocolBuilder<'a> {
             vk,
             cs,
             num_instance,
+            committed_instance_count,
             num_advice,
             num_challenge,
             advice_index,
@@ -540,6 +550,13 @@ impl<'a> MidnightProtocolBuilder<'a> {
             bail!(
                 "instance column mismatch: protocol has {}, provided {}",
                 self.cs.num_instance_columns(),
+                self.num_instance.len()
+            );
+        }
+        if self.committed_instance_count > self.num_instance.len() {
+            bail!(
+                "committed instance count {} exceeds total instance columns {}",
+                self.committed_instance_count,
                 self.num_instance.len()
             );
         }
