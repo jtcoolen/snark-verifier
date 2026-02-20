@@ -8,11 +8,11 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use ff::{Field, PrimeField};
-use group::Group;
 #[cfg(feature = "evm-bench")]
 use group::prime::PrimeCurveAffine;
 #[cfg(feature = "evm-bench")]
 use group::Curve;
+use group::Group;
 #[cfg(feature = "evm-bench")]
 use midnight_curves::CurveAffine as MidnightCurveAffine;
 use num_bigint::BigUint;
@@ -97,7 +97,7 @@ const FINAL_ACC_PUBLIC_INPUTS: usize = 28;
 #[cfg(feature = "evm-bench")]
 const SUBROOT_PUBLIC_INPUT_INDEX: usize = 6;
 #[cfg(feature = "evm-bench")]
-const CLIENT_PUBLIC_ITEMS_WIDTH: usize = 7;
+const CLIENT_PUBLIC_ITEMS_WIDTH: usize = rollup_ivc_circuits::CLIENT_ITEMS_WIDTH;
 #[cfg(feature = "evm-bench")]
 const FINAL_ACC_PUBLIC_INPUTS_OFFSET: usize =
     STATE_TRANSITION_PUBLIC_INPUTS + L2_METADATA_MERKLE_PUBLIC_INPUTS;
@@ -230,10 +230,7 @@ fn le_component_to_padded_word_hex(component_le: &[u8]) -> [String; 2] {
     be.reverse();
     let offset = BLS_ENCODED_FP_BYTES - be.len();
     padded[offset..].copy_from_slice(&be);
-    [
-        format!("0x{}", hex::encode(&padded[..0x20])),
-        format!("0x{}", hex::encode(&padded[0x20..])),
-    ]
+    [format!("0x{}", hex::encode(&padded[..0x20])), format!("0x{}", hex::encode(&padded[0x20..]))]
 }
 
 #[cfg(feature = "evm-bench")]
@@ -434,7 +431,8 @@ fn encode_verify_and_update_call(
     let metadata_offset = bytes_offset + verifier_tail_size;
     let metadata_tail_size = 32 + (l2_block_metadata.len() * 32);
 
-    let mut encoded = Vec::with_capacity(4 + bytes_offset + verifier_tail_size + metadata_tail_size);
+    let mut encoded =
+        Vec::with_capacity(4 + bytes_offset + verifier_tail_size + metadata_tail_size);
     encoded.extend_from_slice(&selector);
     encoded.extend_from_slice(&abi_word_from_usize(bytes_offset));
     for (idx, value) in public_inputs[..STATE_TRANSITION_PUBLIC_INPUTS].iter().enumerate() {
@@ -443,8 +441,8 @@ fn encode_verify_and_update_call(
         }
         encoded.extend_from_slice(&field_to_abi_word(*value));
     }
-    for value in
-        &public_inputs[FINAL_ACC_PUBLIC_INPUTS_OFFSET..FINAL_ACC_PUBLIC_INPUTS_OFFSET + FINAL_ACC_PUBLIC_INPUTS]
+    for value in &public_inputs
+        [FINAL_ACC_PUBLIC_INPUTS_OFFSET..FINAL_ACC_PUBLIC_INPUTS_OFFSET + FINAL_ACC_PUBLIC_INPUTS]
     {
         encoded.extend_from_slice(&field_to_abi_word(*value));
     }
@@ -786,8 +784,8 @@ fn emit_rollup_transition_evm_bench(
     )
     .map_err(|e| AppError::EvmBench(err_string(e)))?;
     for (idx, shard_solidity) in unrolled_sharded.shard_solidity_sources.iter().enumerate() {
-        let path =
-            out_dir.join(format!("ShieldedPoolRollupTransitionVerifierUnrolledShardedShard{idx}.sol"));
+        let path = out_dir
+            .join(format!("ShieldedPoolRollupTransitionVerifierUnrolledShardedShard{idx}.sol"));
         std::fs::write(path, shard_solidity).map_err(|e| AppError::EvmBench(err_string(e)))?;
     }
     let shards_lines = unrolled_sharded
@@ -825,8 +823,10 @@ fn emit_rollup_transition_evm_bench(
         .map_err(|e| AppError::EvmBench(err_string(e)))?;
         let calldata =
             bundle.encode_evm_calldata().map_err(|e| AppError::EvmBench(err_string(e)))?;
-        let calldata_path =
-            out_dir.join(format!("batch_{}_transition_{}.calldata", sample.batch_idx, sample.transition_idx));
+        let calldata_path = out_dir.join(format!(
+            "batch_{}_transition_{}.calldata",
+            sample.batch_idx, sample.transition_idx
+        ));
         std::fs::write(&calldata_path, hex::encode(&calldata))
             .map_err(|e| AppError::EvmBench(err_string(e)))?;
         verifier_calldatas.push((sample.batch_idx, sample.transition_idx, calldata));
@@ -864,7 +864,9 @@ fn emit_rollup_transition_evm_bench(
                 .data(Bytes::from(deployment_code.clone()))
                 .build_fill();
             let deploy_result = evm.transact_commit(deployment_tx).map_err(|err| {
-                AppError::EvmBench(format!("revm transition-shard deployment error for shard {idx}: {err}"))
+                AppError::EvmBench(format!(
+                    "revm transition-shard deployment error for shard {idx}: {err}"
+                ))
             })?;
             let (address, gas_used) = match deploy_result {
                 ExecutionResult::Success {
@@ -900,9 +902,10 @@ fn emit_rollup_transition_evm_bench(
             .kind(TxKind::Create)
             .data(Bytes::from(dispatcher_deployment))
             .build_fill();
-        let dispatcher_deploy_result = evm.transact_commit(dispatcher_deploy_tx).map_err(|err| {
-            AppError::EvmBench(format!("revm transition-dispatcher deployment error: {err}"))
-        })?;
+        let dispatcher_deploy_result =
+            evm.transact_commit(dispatcher_deploy_tx).map_err(|err| {
+                AppError::EvmBench(format!("revm transition-dispatcher deployment error: {err}"))
+            })?;
         let (dispatcher_address, dispatcher_deploy_gas) = match dispatcher_deploy_result {
             ExecutionResult::Success {
                 gas_used,
@@ -929,9 +932,7 @@ fn emit_rollup_transition_evm_bench(
         let deployment_gas_total = shard_deploy_gas.saturating_add(dispatcher_deploy_gas);
         println!(
             "revm rollup-transition verifier deploy gas: shards={} dispatcher={} total={}",
-            shard_deploy_gas,
-            dispatcher_deploy_gas,
-            deployment_gas_total
+            shard_deploy_gas, dispatcher_deploy_gas, deployment_gas_total
         );
 
         let mut call_gas_total = 0u64;
@@ -950,9 +951,7 @@ fn emit_rollup_transition_evm_bench(
                     call_gas_total = call_gas_total.saturating_add(gas_used);
                     println!(
                         "revm rollup-transition batch {} transition {} verify gas: {}",
-                        batch_idx,
-                        transition_idx,
-                        gas_used
+                        batch_idx, transition_idx, gas_used
                     );
                     call_gas_per_transition.push(json!({
                         "batch_index": batch_idx,
@@ -1076,11 +1075,7 @@ fn emit_final_wrap_evm_stateful_loop_bench(
     let pairing_g2_words = g2_to_word_hex(midnight_curves::G2Affine::generator());
     let pairing_minus_tau_words = g2_to_word_hex(-tau_in_g2);
     assert_eq!(pairing_g2_words.len(), 8, "g2 words must have length 8");
-    assert_eq!(
-        pairing_minus_tau_words.len(),
-        8,
-        "minus_tau words must have length 8"
-    );
+    assert_eq!(pairing_minus_tau_words.len(), 8, "minus_tau words must have length 8");
 
     let pairing_g2_consts = pairing_g2_words
         .iter()
@@ -1104,6 +1099,11 @@ fn emit_final_wrap_evm_stateful_loop_bench(
         .map(|idx| format!("        pairingInput[{}] = PAIRING_MINUS_TAU_{idx};", 16 + idx))
         .collect::<Vec<_>>()
         .join("\n");
+    let client_public_items_width = CLIENT_PUBLIC_ITEMS_WIDTH;
+    let client_public_items_encode_args = (0..CLIENT_PUBLIC_ITEMS_WIDTH)
+        .map(|idx| format!("                    l2BlockMetadata[start + {idx}]"))
+        .collect::<Vec<_>>()
+        .join(",\n");
     let stateful_solidity = format!(
         r#"
 // SPDX-License-Identifier: MIT
@@ -1123,7 +1123,7 @@ contract ShieldedPoolStatefulVerifier {{
     uint256 internal constant LIMB4_LOW_MASK = (1 << 32) - 1;
     uint256 internal constant FIELD_MODULUS =
         0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001;
-    uint256 internal constant CLIENT_PUBLIC_ITEMS_WIDTH = 7;
+    uint256 internal constant CLIENT_PUBLIC_ITEMS_WIDTH = {client_public_items_width};
     uint256 internal constant SUBROOT_PI_OFFSET = 0xc0;
     uint256 internal constant G1MSM_GAS_CAP = 5000000;
     uint256 internal constant PAIRING_GAS_CAP = 20000000;
@@ -1188,13 +1188,7 @@ contract ShieldedPoolStatefulVerifier {{
         return _keccakToField(
             keccak256(
                 abi.encodePacked(
-                    l2BlockMetadata[start],
-                    l2BlockMetadata[start + 1],
-                    l2BlockMetadata[start + 2],
-                    l2BlockMetadata[start + 3],
-                    l2BlockMetadata[start + 4],
-                    l2BlockMetadata[start + 5],
-                    l2BlockMetadata[start + 6]
+{client_public_items_encode_args}
                 )
             )
         );
@@ -1533,7 +1527,8 @@ contract ShieldedPoolStatefulVerifier {{
     )
     .map_err(|e| AppError::EvmBench(err_string(e)))?;
     for (idx, shard_solidity) in unrolled_sharded.shard_solidity_sources.iter().enumerate() {
-        let path = out_dir.join(format!("ShieldedPoolFinalWrapVerifierUnrolledShardedShard{idx}.sol"));
+        let path =
+            out_dir.join(format!("ShieldedPoolFinalWrapVerifierUnrolledShardedShard{idx}.sol"));
         std::fs::write(path, shard_solidity).map_err(|e| AppError::EvmBench(err_string(e)))?;
     }
     let shards_lines = unrolled_sharded
@@ -1883,11 +1878,7 @@ contract ShieldedPoolStatefulVerifier {{
 
     let processed_batches = if env_flag("RUN_REVM") {
         FINAL_WRAP_STATEFUL_LOOP_CACHE.with(|cache_cell| {
-            cache_cell
-                .borrow()
-                .as_ref()
-                .map(|cache| cache.processed_batch_ids.len())
-                .unwrap_or(0)
+            cache_cell.borrow().as_ref().map(|cache| cache.processed_batch_ids.len()).unwrap_or(0)
         })
     } else {
         samples.len()
@@ -1961,20 +1952,22 @@ contract ShieldedPoolStatefulVerifier {{
 // Host-side structures + helpers
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Single Poseidon hash of all 7 would-be public inputs (host-side).
-fn host_instance_hash(items: [F; 7]) -> F {
+/// Single Poseidon hash of all client public inputs (host-side).
+fn host_instance_hash(items: [F; rollup_ivc_circuits::CLIENT_ITEMS_WIDTH]) -> F {
     use midnight_circuits::instructions::hash::HashCPU;
     <PoseidonChip<F> as HashCPU<F, F>>::hash(&items)
 }
 
 /// Host-side Keccak Merkle hash over flattened L2 block metadata.
 ///
-/// Metadata layout is `N` rows of width 7:
-/// `[root_before, pk_bx, pk_by, new1_commit, new2_commit, nf1, nf2]`.
-/// Leaves are `keccak256(abi.encodePacked(row[0], ..., row[6]))`.
+/// Metadata layout is `N` rows of width 19:
+/// `[roots[0], roots[1], roots[2], roots[3], pk_bx, pk_by, new_comms[0], new_comms[1],
+/// new_comms[2], new_comms[3], nfs[0], nfs[1], nfs[2], nfs[3],
+/// comp_secs[0], comp_secs[1], comp_secs[2], comp_secs[3], comp_secs[4]]`.
+/// Leaves are `keccak256(abi.encodePacked(row[0], ..., row[18]))`.
 /// Internal nodes are `keccak256(left || right)` with right duplicated when odd.
 fn l2_metadata_merkle_hash(metadata: &[F]) -> Result<F, AppError> {
-    const METADATA_WIDTH: usize = 7;
+    const METADATA_WIDTH: usize = rollup_ivc_circuits::CLIENT_ITEMS_WIDTH;
 
     if metadata.is_empty() || metadata.len() % METADATA_WIDTH != 0 {
         return Err(AppError::ReplayGuard(format!(
@@ -2124,19 +2117,18 @@ fn build_public_items(
     new2_commit: F,
     nf1: F,
     nf2: F,
-) -> ([F; 7], F, transfer_circuit::Spend2Output2PublicInputs) {
-    let public_items = [root_before, pk_bx, pk_by, new1_commit, new2_commit, nf1, nf2];
-    let state = host_instance_hash(public_items);
-
+) -> ([F; rollup_ivc_circuits::CLIENT_ITEMS_WIDTH], F, transfer_circuit::Spend2Output2PublicInputs)
+{
     let instance = transfer_circuit::Spend2Output2PublicInputs {
-        root: root_before,
+        roots: [root_before; 4],
         pk_bx,
         pk_by,
-        new_c1: new1_commit,
-        new_c2: new2_commit,
-        nf1,
-        nf2,
+        new_comms: [new1_commit, new2_commit, F::ZERO, F::ZERO],
+        nfs: [nf1, nf2, F::ZERO, F::ZERO],
+        comp_secs: [F::ZERO; 5],
     };
+    let public_items = instance.as_array();
+    let state = host_instance_hash(public_items);
 
     (public_items, state, instance)
 }
@@ -2305,7 +2297,7 @@ fn plan_transaction(
 
 struct BuiltTx {
     // For proof payload
-    public_items: [F; 7],
+    public_items: [F; rollup_ivc_circuits::CLIENT_ITEMS_WIDTH],
     state: F,
     instance: transfer_circuit::Spend2Output2PublicInputs,
     witness: (
@@ -2599,7 +2591,8 @@ fn run() -> Result<(), AppError> {
     #[cfg(feature = "evm-bench")]
     let run_transition_bench = run_evm_bench && env_flag("SHIELDED_POOL_EVM_BENCH_TRANSITIONS");
     #[cfg(feature = "evm-bench")]
-    let run_final_wrap_bench = run_evm_bench && !env_flag("SHIELDED_POOL_EVM_SKIP_FINAL_WRAP_BENCH");
+    let run_final_wrap_bench =
+        run_evm_bench && !env_flag("SHIELDED_POOL_EVM_SKIP_FINAL_WRAP_BENCH");
     let skip_replay_demo = env_flag("SHIELDED_POOL_SKIP_REPLAY_DEMO") || run_evm_bench;
 
     #[cfg(feature = "evm-bench")]
@@ -2883,10 +2876,8 @@ fn run() -> Result<(), AppError> {
                 &final_acc,
                 &agg_result.fixed_bases,
             );
-            let l2_block_metadata = client_proofs
-                .iter()
-                .flat_map(|proof| proof.public_items)
-                .collect::<Vec<_>>();
+            let l2_block_metadata =
+                client_proofs.iter().flat_map(|proof| proof.public_items).collect::<Vec<_>>();
             let l2_metadata_merkle_hash = l2_metadata_merkle_hash(&l2_block_metadata)?;
 
             let final_circuit = rollup_ivc_circuits::WrapStepCircuit {
@@ -3102,21 +3093,14 @@ fn run() -> Result<(), AppError> {
             max_proof_time
         );
     }
-    println!(
-        "rollup transitions completed: {} (target {})",
-        batch_idx, planned_rollup_transitions
-    );
+    println!("rollup transitions completed: {} (target {})", batch_idx, planned_rollup_transitions);
 
     #[cfg(feature = "evm-bench")]
     {
         if run_evm_bench {
             if run_transition_bench {
-                let transition_vk = agg_setup
-                    .agg_store
-                    .get(agg_setup.max_agg_level)
-                    .vk
-                    .as_ref()
-                    .clone();
+                let transition_vk =
+                    agg_setup.agg_store.get(agg_setup.max_agg_level).vk.as_ref().clone();
                 emit_rollup_transition_evm_bench(
                     agg_setup.agg_srs_internal.verifier_params(),
                     transition_vk,

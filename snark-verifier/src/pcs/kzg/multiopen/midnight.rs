@@ -44,13 +44,13 @@ trait MidnightTruncatedChallengeOps<C: CurveAffine>: Loader<C> {
 
         #[cfg(feature = "truncated-challenges")]
         {
-        let mut powers = Vec::with_capacity(n);
-        let mut power = self.load_one();
-        for _ in 0..n {
-            powers.push(self.truncate_challenge_128(&power));
-            power = power * base;
-        }
-        powers
+            let mut powers = Vec::with_capacity(n);
+            let mut power = self.load_one();
+            for _ in 0..n {
+                powers.push(self.truncate_challenge_128(&power));
+                power = power * base;
+            }
+            powers
         }
     }
 }
@@ -63,7 +63,7 @@ where
     fn truncate_challenge_128(&self, value: &Self::LoadedScalar) -> Self::LoadedScalar {
         #[cfg(feature = "truncated-challenges")]
         {
-        truncate_scalar_to_half_bytes(*value)
+            truncate_scalar_to_half_bytes(*value)
         }
         #[cfg(not(feature = "truncated-challenges"))]
         {
@@ -81,7 +81,7 @@ where
     fn truncate_challenge_128(&self, value: &Self::LoadedScalar) -> Self::LoadedScalar {
         #[cfg(feature = "truncated-challenges")]
         {
-        self.truncate_scalar_to_128(value)
+            self.truncate_scalar_to_128(value)
         }
         #[cfg(not(feature = "truncated-challenges"))]
         {
@@ -342,7 +342,7 @@ where
     let final_com = {
         let mut coms = q_coms;
         coms.push(Msm::base(&proof.f_com));
-    let powers_x4 = loader.powers_with_challenge_policy(&proof.x4, coms.len());
+        let powers_x4 = loader.powers_with_challenge_policy(&proof.x4, coms.len());
         coms.into_iter().zip(powers_x4.iter()).map(|(msm, scalar)| msm * scalar).sum::<Msm<_, _>>()
     };
     let v = {

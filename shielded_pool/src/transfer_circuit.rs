@@ -28,28 +28,89 @@ const UTXO_NULLIFY_TAG: u64 = 0x0002;
 const AMOUNT_BITS: u32 = 128;
 pub(crate) const AMOUNT_GEN_BITS: u32 = 120;
 
-/// Public inputs (unhashed): these are constrained individually as public inputs, in this exact order.
-#[derive(Clone, Copy, Debug)]
-pub struct Spend2Output2PublicInputs {
-    pub root: F,
-    pub pk_bx: F,
-    pub pk_by: F,
-    pub new_c1: F,
-    pub new_c2: F,
-    pub nf1: F,
-    pub nf2: F,
+pub(crate) const CLIENT_PUBLIC_ITEMS_WIDTH: usize = 19;
+
+/// Typed encoding for the 19 public items in client proofs.
+///
+/// Canonical order:
+/// [roots[0], roots[1], roots[2], roots[3], pk_bx, pk_by, new_comms[0], new_comms[1],
+/// new_comms[2], new_comms[3], nfs[0], nfs[1], nfs[2], nfs[3],
+/// comp_secs[0], comp_secs[1], comp_secs[2], comp_secs[3], comp_secs[4]].
+#[derive(Clone, Debug)]
+pub struct ClientPublicItems<T> {
+    /// Historic roots the client is using.
+    pub roots: [T; 4],
+    /// Sender public-key x-coordinate.
+    pub pk_bx: T,
+    /// Sender public-key y-coordinate.
+    pub pk_by: T,
+    /// New commitments created by the client transaction.
+    pub new_comms: [T; 4],
+    /// Nullifiers consumed by the client transaction.
+    pub nfs: [T; 4],
+    /// Compressed secrets.
+    pub comp_secs: [T; 5],
 }
 
-impl Default for Spend2Output2PublicInputs {
+impl<T> From<[T; CLIENT_PUBLIC_ITEMS_WIDTH]> for ClientPublicItems<T> {
+    fn from(arr: [T; CLIENT_PUBLIC_ITEMS_WIDTH]) -> Self {
+        let [root0, root1, root2, root3, pk_bx, pk_by, new_comm0, new_comm1, new_comm2, new_comm3, nf0, nf1, nf2, nf3, comp_sec0, comp_sec1, comp_sec2, comp_sec3, comp_sec4] =
+            arr;
+
+        Self {
+            roots: [root0, root1, root2, root3],
+            pk_bx,
+            pk_by,
+            new_comms: [new_comm0, new_comm1, new_comm2, new_comm3],
+            nfs: [nf0, nf1, nf2, nf3],
+            comp_secs: [comp_sec0, comp_sec1, comp_sec2, comp_sec3, comp_sec4],
+        }
+    }
+}
+
+impl<T: Clone> ClientPublicItems<T> {
+    #[inline]
+    pub fn as_array(&self) -> [T; CLIENT_PUBLIC_ITEMS_WIDTH] {
+        [
+            self.roots[0].clone(),
+            self.roots[1].clone(),
+            self.roots[2].clone(),
+            self.roots[3].clone(),
+            self.pk_bx.clone(),
+            self.pk_by.clone(),
+            self.new_comms[0].clone(),
+            self.new_comms[1].clone(),
+            self.new_comms[2].clone(),
+            self.new_comms[3].clone(),
+            self.nfs[0].clone(),
+            self.nfs[1].clone(),
+            self.nfs[2].clone(),
+            self.nfs[3].clone(),
+            self.comp_secs[0].clone(),
+            self.comp_secs[1].clone(),
+            self.comp_secs[2].clone(),
+            self.comp_secs[3].clone(),
+            self.comp_secs[4].clone(),
+        ]
+    }
+
+    #[inline]
+    pub fn as_vec(&self) -> Vec<T> {
+        Vec::from(self.as_array())
+    }
+}
+
+pub(crate) type Spend2Output2PublicInputs = ClientPublicItems<F>;
+
+impl Default for ClientPublicItems<F> {
     fn default() -> Self {
         Self {
-            root: F::ZERO,
+            roots: [F::ZERO; 4],
             pk_bx: F::ZERO,
             pk_by: F::ZERO,
-            new_c1: F::ZERO,
-            new_c2: F::ZERO,
-            nf1: F::ZERO,
-            nf2: F::ZERO,
+            new_comms: [F::ZERO; 4],
+            nfs: [F::ZERO; 4],
+            comp_secs: [F::ZERO; 5],
         }
     }
 }
@@ -80,15 +141,7 @@ impl Relation for Spend2Output2 {
     );
 
     fn format_instance(instance: &Self::Instance) -> Result<Vec<F>, Error> {
-        Ok(vec![
-            instance.root,
-            instance.pk_bx,
-            instance.pk_by,
-            instance.new_c1,
-            instance.new_c2,
-            instance.nf1,
-            instance.nf2,
-        ])
+        Ok(instance.as_vec())
     }
 
     fn circuit(
@@ -168,14 +221,29 @@ impl Relation for Spend2Output2 {
             std_lib, layouter, &old1_asg, &old2_asg, &new1_asg, &new2_asg,
         )?;
 
-        // Unhashed public inputs: constrain each value directly as a public input (in the same order as format_instance).
-        std_lib.constrain_as_public_input(layouter, &root)?;
+        // Public items are encoded with padding for 19 canonical slots.
+        let pi_zero: AssignedNative<F> = std_lib.assign_fixed(layouter, F::ZERO)?;
+
+        let roots = [root.clone(), root.clone(), root.clone(), root];
+        let new_comms = [new_c1.clone(), new_c2.clone(), pi_zero.clone(), pi_zero.clone()];
+        let nfs = [nf1.clone(), nf2.clone(), pi_zero.clone(), pi_zero.clone()];
+        let comp_secs =
+            [pi_zero.clone(), pi_zero.clone(), pi_zero.clone(), pi_zero.clone(), pi_zero.clone()];
+
+        for r in roots {
+            std_lib.constrain_as_public_input(layouter, &r)?;
+        }
         std_lib.constrain_as_public_input(layouter, &pk_bx)?;
         std_lib.constrain_as_public_input(layouter, &pk_by)?;
-        std_lib.constrain_as_public_input(layouter, &new_c1)?;
-        std_lib.constrain_as_public_input(layouter, &new_c2)?;
-        std_lib.constrain_as_public_input(layouter, &nf1)?;
-        std_lib.constrain_as_public_input(layouter, &nf2)?;
+        for c in new_comms {
+            std_lib.constrain_as_public_input(layouter, &c)?;
+        }
+        for n in nfs {
+            std_lib.constrain_as_public_input(layouter, &n)?;
+        }
+        for sec in comp_secs {
+            std_lib.constrain_as_public_input(layouter, &sec)?;
+        }
 
         Ok(())
     }
@@ -508,7 +576,14 @@ mod tests {
         let nf1 = host_nullify(old_c1, pk_sx, pk_sy);
         let nf2 = host_nullify(old_c2, pk_sx, pk_sy);
 
-        let instance = Spend2Output2PublicInputs { root, pk_bx, pk_by, new_c1, new_c2, nf1, nf2 };
+        let instance = Spend2Output2PublicInputs {
+            roots: [root; 4],
+            pk_bx,
+            pk_by,
+            new_comms: [new_c1, new_c2, F::ZERO, F::ZERO],
+            nfs: [nf1, nf2, F::ZERO, F::ZERO],
+            comp_secs: [F::ZERO; 5],
+        };
 
         let witness = (commit_map, sk, alpha_f, old1, old2, new1, new2, pk1_out, pk2_out);
 
@@ -575,7 +650,7 @@ mod tests {
     fn negative_wrong_root_is_rejected() {
         let seed = 1001;
         let (mut instance, witness) = make_valid_case(seed);
-        instance.root = F::random(&mut ChaCha8Rng::seed_from_u64(9999)); // tamper
+        instance.roots[0] = F::random(&mut ChaCha8Rng::seed_from_u64(9999)); // tamper
         assert!(rejects(&instance, witness, seed));
     }
 
@@ -664,7 +739,7 @@ mod tests {
         let seed = 1009;
         let (mut instance, witness) = make_valid_case(seed);
 
-        instance.new_c1 = F::random(&mut ChaCha8Rng::seed_from_u64(321));
+        instance.new_comms[0] = F::random(&mut ChaCha8Rng::seed_from_u64(321));
         assert!(rejects(&instance, witness, seed));
     }
 
@@ -673,7 +748,7 @@ mod tests {
         let seed = 1010;
         let (mut instance, witness) = make_valid_case(seed);
 
-        instance.nf2 = F::random(&mut ChaCha8Rng::seed_from_u64(777));
+        instance.nfs[1] = F::random(&mut ChaCha8Rng::seed_from_u64(777));
         assert!(rejects(&instance, witness, seed));
     }
 }

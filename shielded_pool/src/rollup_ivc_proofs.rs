@@ -21,7 +21,7 @@ use midnight_proofs::{
 };
 
 use crate::{
-    rollup_ivc_circuits::{self, VkData, AGG_STATE_WIDTH},
+    rollup_ivc_circuits::{self, ClientPublicItems, VkData, AGG_STATE_WIDTH, CLIENT_ITEMS_WIDTH},
     setup_ivc,
 };
 
@@ -116,8 +116,8 @@ fn hash_pair(a: F, b: F) -> F {
     <PoseidonChip<F> as HashCPU<F, F>>::hash(&[a, b])
 }
 
-// Host-side: single Poseidon hash of all 7 public items
-fn host_instance_hash(items: [F; 7]) -> F {
+// Host-side: single Poseidon hash of all client public items.
+fn host_instance_hash(items: [F; CLIENT_ITEMS_WIDTH]) -> F {
     use midnight_circuits::instructions::hash::HashCPU;
     <PoseidonChip<F> as HashCPU<F, F>>::hash(&items)
 }
@@ -153,10 +153,16 @@ fn map_insert_many(map: Map, entries: impl IntoIterator<Item = (F, F)>) -> Map {
     })
 }
 
-fn apply_tx_effects(commit_map: Map, null_map: Map, items: [F; 7]) -> (Map, Map) {
-    let [_tx_root, _x1, _x2, c1, c2, nf1, nf2] = items;
-    let commit_map = map_insert_many(commit_map, [(c1, F::ONE), (c2, F::ONE)]);
-    let null_map = map_insert_many(null_map, [(nf1, F::ONE), (nf2, F::ONE)]);
+fn apply_tx_effects(commit_map: Map, null_map: Map, items: [F; CLIENT_ITEMS_WIDTH]) -> (Map, Map) {
+    let items = ClientPublicItems::from(items);
+    let commit_map = map_insert_many(
+        commit_map,
+        items.applied_commitments().copied().map(|commitment| (commitment, F::ONE)),
+    );
+    let null_map = map_insert_many(
+        null_map,
+        items.applied_nullifiers().copied().map(|nullifier| (nullifier, F::ONE)),
+    );
     (commit_map, null_map)
 }
 
@@ -250,7 +256,7 @@ pub struct TreeNode {
 pub struct ClientProof {
     pub state: F,
     pub proof: Vec<u8>,
-    pub public_items: [F; 7],
+    pub public_items: [F; CLIENT_ITEMS_WIDTH],
 }
 
 #[derive(Clone, Debug)]
@@ -311,12 +317,13 @@ fn check_client(
     side: &'static str,
     proof: &ClientProof,
 ) -> Result<(), AggregationError> {
-    let [tx_root, ..] = proof.public_items;
-
-    ensure(roots.get(&tx_root) == F::ONE, AggregationError::HistoricRootMissing { leaf, side })?;
+    let items = ClientPublicItems::from(proof.public_items.clone());
+    for tx_root in items.roots() {
+        ensure(roots.get(tx_root) == F::ONE, AggregationError::HistoricRootMissing { leaf, side })?;
+    }
 
     ensure(
-        host_instance_hash(proof.public_items) == proof.state,
+        host_instance_hash(proof.public_items.clone()) == proof.state,
         AggregationError::InstanceMismatch { leaf, side },
     )?;
 
@@ -350,8 +357,8 @@ fn plan_leaves<'a>(
             let pre_c_for_leaf = c_map.clone();
             let pre_n_for_leaf = n_map.clone();
 
-            let (c1, n1) = apply_tx_effects(c_map, n_map, left.public_items);
-            let (c2, n2) = apply_tx_effects(c1, n1, right.public_items);
+            let (c1, n1) = apply_tx_effects(c_map, n_map, left.public_items.clone());
+            let (c2, n2) = apply_tx_effects(c1, n1, right.public_items.clone());
 
             let expected_state = rollup_ivc_circuits::AggState {
                 c_pre,

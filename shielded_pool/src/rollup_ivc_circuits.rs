@@ -108,7 +108,7 @@ pub const AGG_K: u32 = 20;
 pub const AGG_STATE_WIDTH: usize = 7;
 
 /// Width of client proof public items (canonical order).
-pub const CLIENT_ITEMS_WIDTH: usize = 7;
+pub const CLIENT_ITEMS_WIDTH: usize = crate::transfer_circuit::CLIENT_PUBLIC_ITEMS_WIDTH;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Aggregation state
@@ -220,24 +220,34 @@ pub fn configure_agg_circuit(meta: &mut ConstraintSystem<F>) -> AggCircuitConfig
 // Encodings (struct <-> array)
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Typed encoding for the 7 public items in client proofs.
+/// Typed encoding for the 19 public items in client proofs.
 ///
-/// Canonical order: `[root_before, pk_bx, pk_by, new_c1, new_c2, nf1, nf2]`.
+/// Canonical order:
+/// [roots[0], roots[1], roots[2], roots[3], pk_bx, pk_by, new_comms[0], new_comms[1],
+/// new_comms[2], new_comms[3], nfs[0], nfs[1], nfs[2], nfs[3],
+/// comp_secs[0], comp_secs[1], comp_secs[2], comp_secs[3], comp_secs[4]].
 #[derive(Clone, Debug)]
 pub struct ClientPublicItems<T> {
-    pub root_before: T,
+    pub roots: [T; 4],
     pub pk_bx: T,
     pub pk_by: T,
-    pub new_c1: T,
-    pub new_c2: T,
-    pub nf1: T,
-    pub nf2: T,
+    pub new_comms: [T; 4],
+    pub nfs: [T; 4],
+    pub comp_secs: [T; 5],
 }
 
 impl<T> From<[T; CLIENT_ITEMS_WIDTH]> for ClientPublicItems<T> {
     fn from(arr: [T; CLIENT_ITEMS_WIDTH]) -> Self {
-        let [root_before, pk_bx, pk_by, new_c1, new_c2, nf1, nf2] = arr;
-        Self { root_before, pk_bx, pk_by, new_c1, new_c2, nf1, nf2 }
+        let [root0, root1, root2, root3, pk_bx, pk_by, new_comm0, new_comm1, new_comm2, new_comm3, nf0, nf1, nf2, nf3, comp_sec0, comp_sec1, comp_sec2, comp_sec3, comp_sec4] =
+            arr;
+        Self {
+            roots: [root0, root1, root2, root3],
+            pk_bx,
+            pk_by,
+            new_comms: [new_comm0, new_comm1, new_comm2, new_comm3],
+            nfs: [nf0, nf1, nf2, nf3],
+            comp_secs: [comp_sec0, comp_sec1, comp_sec2, comp_sec3, comp_sec4],
+        }
     }
 }
 
@@ -245,13 +255,25 @@ impl<T: Clone> ClientPublicItems<T> {
     #[inline]
     pub fn as_array(&self) -> [T; CLIENT_ITEMS_WIDTH] {
         [
-            self.root_before.clone(),
+            self.roots[0].clone(),
+            self.roots[1].clone(),
+            self.roots[2].clone(),
+            self.roots[3].clone(),
             self.pk_bx.clone(),
             self.pk_by.clone(),
-            self.new_c1.clone(),
-            self.new_c2.clone(),
-            self.nf1.clone(),
-            self.nf2.clone(),
+            self.new_comms[0].clone(),
+            self.new_comms[1].clone(),
+            self.new_comms[2].clone(),
+            self.new_comms[3].clone(),
+            self.nfs[0].clone(),
+            self.nfs[1].clone(),
+            self.nfs[2].clone(),
+            self.nfs[3].clone(),
+            self.comp_secs[0].clone(),
+            self.comp_secs[1].clone(),
+            self.comp_secs[2].clone(),
+            self.comp_secs[3].clone(),
+            self.comp_secs[4].clone(),
         ]
     }
 
@@ -263,13 +285,18 @@ impl<T: Clone> ClientPublicItems<T> {
 
 impl<T> ClientPublicItems<T> {
     #[inline]
-    pub fn commitments(&self) -> impl Iterator<Item = &T> {
-        core::iter::once(&self.new_c1).chain(core::iter::once(&self.new_c2))
+    pub fn roots(&self) -> impl Iterator<Item = &T> {
+        self.roots.iter()
     }
 
     #[inline]
-    pub fn nullifiers(&self) -> impl Iterator<Item = &T> {
-        core::iter::once(&self.nf1).chain(core::iter::once(&self.nf2))
+    pub fn applied_commitments(&self) -> impl Iterator<Item = &T> {
+        self.new_comms.iter().take(2)
+    }
+
+    #[inline]
+    pub fn applied_nullifiers(&self) -> impl Iterator<Item = &T> {
+        self.nfs.iter().take(2)
     }
 }
 
@@ -427,11 +454,11 @@ impl AggCtx {
         zero: &AssignedNative<F>,
         one: &AssignedNative<F>,
     ) -> Result<(), Error> {
-        for commitment in items.commitments() {
+        for commitment in items.applied_commitments() {
             commit_map.insert(layouter, commitment, one)?;
         }
 
-        for nullifier in items.nullifiers() {
+        for nullifier in items.applied_nullifiers() {
             let existing = null_map.get(layouter, nullifier)?;
             self.assert_eq(layouter, &existing, zero)?;
             null_map.insert(layouter, nullifier, one)?;
@@ -483,10 +510,17 @@ fn assign_client_items(
     layouter: &mut impl Layouter<F>,
     items: Value<[F; CLIENT_ITEMS_WIDTH]>,
 ) -> Result<ClientPublicItems<AssignedNative<F>>, Error> {
-    let [root_before, pk_bx, pk_by, new_c1, new_c2, nf1, nf2] =
+    let [root0, root1, root2, root3, pk_bx, pk_by, new_comm0, new_comm1, new_comm2, new_comm3, nf0, nf1, nf2, nf3, comp_sec0, comp_sec1, comp_sec2, comp_sec3, comp_sec4] =
         assign_values(ctx, layouter, project_value_array(items))?;
 
-    Ok(ClientPublicItems { root_before, pk_bx, pk_by, new_c1, new_c2, nf1, nf2 })
+    Ok(ClientPublicItems {
+        roots: [root0, root1, root2, root3],
+        pk_bx,
+        pk_by,
+        new_comms: [new_comm0, new_comm1, new_comm2, new_comm3],
+        nfs: [nf0, nf1, nf2, nf3],
+        comp_secs: [comp_sec0, comp_sec1, comp_sec2, comp_sec3, comp_sec4],
+    })
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -562,14 +596,13 @@ pub fn base_step(
     let left = assign_client_items(ctx, layouter, left_items)?;
     let right = assign_client_items(ctx, layouter, right_items)?;
 
-    // Membership: tx_root ∈ historic_commitment_roots_set.
-    ctx.verify_map_membership_is_one(layouter, &commitment_roots_set_map, &left.root_before, &one)?;
-    ctx.verify_map_membership_is_one(
-        layouter,
-        &commitment_roots_set_map,
-        &right.root_before,
-        &one,
-    )?;
+    // Membership: every client-supplied root must belong to the historic commitment-roots set.
+    for root in left.roots() {
+        ctx.verify_map_membership_is_one(layouter, &commitment_roots_set_map, root, &one)?;
+    }
+    for root in right.roots() {
+        ctx.verify_map_membership_is_one(layouter, &commitment_roots_set_map, root, &one)?;
+    }
 
     // Hash client public inputs inside the base circuit (used for leaf subroot / rollup binding).
     let inst_left_hash = ctx.hash_client_instance(layouter, &left)?;
@@ -592,8 +625,8 @@ pub fn base_step(
             commitment_roots_set_root,
             block_level: blk_assigned,
         },
-        left.as_vec(),  // <-- verify client proof with its 7 unhashed public inputs
-        right.as_vec(), // <-- verify client proof with its 7 unhashed public inputs
+        left.as_vec(),  // <-- verify client proof with its 19 unhashed public inputs
+        right.as_vec(), // <-- verify client proof with its 19 unhashed public inputs
     ))
 }
 

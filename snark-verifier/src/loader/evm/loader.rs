@@ -2,8 +2,8 @@ use crate::{
     loader::{
         evm::{
             code::{
-                EvmCodegenMode, Precompiled, SolidityAssemblyCode,
-                UnrolledShardedProgramManifest, UnrolledShardedVerifierArtifacts,
+                EvmCodegenMode, Precompiled, SolidityAssemblyCode, UnrolledShardedProgramManifest,
+                UnrolledShardedVerifierArtifacts,
             },
             compact_codegen::{build_compact_verifier_artifacts, CompactVerifierArtifacts},
             compact_ir::{
@@ -185,18 +185,12 @@ contract Halo2VerifierDispatcher {{
 }
 
 fn try_compile_solidity_sizes(solidity: &str) -> Option<(Vec<u8>, Vec<u8>)> {
-    let deployment =
-        catch_unwind(AssertUnwindSafe(|| compile_solidity(solidity))).ok()?;
-    let runtime =
-        catch_unwind(AssertUnwindSafe(|| compile_solidity_runtime(solidity))).ok()?;
+    let deployment = catch_unwind(AssertUnwindSafe(|| compile_solidity(solidity))).ok()?;
+    let runtime = catch_unwind(AssertUnwindSafe(|| compile_solidity_runtime(solidity))).ok()?;
     Some((deployment, runtime))
 }
 
-fn join_statement_blocks(
-    blocks: &[String],
-    start: usize,
-    end: usize,
-) -> String {
+fn join_statement_blocks(blocks: &[String], start: usize, end: usize) -> String {
     blocks[start..end].iter().map(String::as_str).join("\n")
 }
 
@@ -384,7 +378,8 @@ impl EvmLoader {
                     success_slot,
                     &body,
                 );
-                let Some((deployment, runtime)) = try_compile_solidity_sizes(&shard_solidity) else {
+                let Some((deployment, runtime)) = try_compile_solidity_sizes(&shard_solidity)
+                else {
                     if single.end - single.start <= 1 {
                         panic!(
                             "failed to compile unrolled-sharded candidate for statement range [{}..{})",
@@ -395,14 +390,8 @@ impl EvmLoader {
                     grouped_ranges.splice(
                         cursor..=cursor,
                         [
-                            ShardStatementRange {
-                                start: single.start,
-                                end: mid,
-                            },
-                            ShardStatementRange {
-                                start: mid,
-                                end: single.end,
-                            },
+                            ShardStatementRange { start: single.start, end: mid },
+                            ShardStatementRange { start: mid, end: single.end },
                         ],
                     );
                     continue;
@@ -425,14 +414,8 @@ impl EvmLoader {
                 grouped_ranges.splice(
                     cursor..=cursor,
                     [
-                        ShardStatementRange {
-                            start: single.start,
-                            end: mid,
-                        },
-                        ShardStatementRange {
-                            start: mid,
-                            end: single.end,
-                        },
+                        ShardStatementRange { start: single.start, end: mid },
+                        ShardStatementRange { start: mid, end: single.end },
                     ],
                 );
             }
@@ -466,10 +449,7 @@ impl EvmLoader {
 
             let stmt_start = grouped_ranges[cursor].start;
             let stmt_end = grouped_ranges[lo - 1].end;
-            shards.push(ShardStatementRange {
-                start: stmt_start,
-                end: stmt_end,
-            });
+            shards.push(ShardStatementRange { start: stmt_start, end: stmt_end });
             cursor = lo;
         }
 
@@ -515,10 +495,9 @@ impl EvmLoader {
         }
 
         let dispatcher_solidity = build_unrolled_dispatcher_solidity(success_slot);
-        let (dispatcher_deployment_code, dispatcher_runtime_code) = try_compile_solidity_sizes(
-            &dispatcher_solidity,
-        )
-        .expect("failed to compile unrolled-sharded dispatcher Solidity");
+        let (dispatcher_deployment_code, dispatcher_runtime_code) =
+            try_compile_solidity_sizes(&dispatcher_solidity)
+                .expect("failed to compile unrolled-sharded dispatcher Solidity");
         assert!(
             dispatcher_runtime_code.len() <= EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES,
             "unrolled-sharded dispatcher runtime exceeds EIP-170 limit: {} > {}",

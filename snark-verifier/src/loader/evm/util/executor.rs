@@ -300,9 +300,7 @@ pub fn deploy_unrolled_sharded_and_call_with_metrics(
         .map_err(|err| format!("revm sharded dispatcher deployment error: {err}"))?;
     let (dispatcher, dispatcher_deploy_gas) = match result {
         ExecutionResult::Success {
-            gas_used,
-            output: Output::Create(_, Some(contract)),
-            ..
+            gas_used, output: Output::Create(_, Some(contract)), ..
         } => (contract, gas_used),
         ExecutionResult::Revert { gas_used, output } => {
             let decoded = decode_revert_output(&output);
@@ -488,9 +486,7 @@ fn encode_compact_constructor_args(
     encoded
 }
 
-fn encode_sharded_constructor_args(
-    shard_addresses: &[revm::primitives::Address],
-) -> Vec<u8> {
+fn encode_sharded_constructor_args(shard_addresses: &[revm::primitives::Address]) -> Vec<u8> {
     let mut encoded = Vec::with_capacity(32 * (2 + shard_addresses.len()));
     encoded.extend_from_slice(&abi_word_from_usize(0x20));
     encoded.extend_from_slice(&abi_word_from_usize(shard_addresses.len()));
