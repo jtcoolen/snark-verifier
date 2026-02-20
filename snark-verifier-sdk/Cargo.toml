@@ -109,3 +109,13 @@ harness = false
 [[example]]
 name = "standard_plonk"
 required-features = ["loader_halo2", "loader_evm"]
+
+[[example]]
+name = "midnight_poseidon"
+required-features = ["midnight"]
+path = "examples/midnight_poseidon.rs"
+
+[[example]]
+name = "midnight_poseidon_evm"
+required-features = ["midnight", "loader_evm"]
+path = "examples/midnight_poseidon_evm.rs"
