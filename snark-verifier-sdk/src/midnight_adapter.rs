@@ -182,6 +182,34 @@ impl MidnightProofBundle {
     }
 
     /// Fully verify through snark-verifier (protocol + proof + PCS + decider).
+    pub fn verify_with_snark_verifier(&self) -> Result<()> {
+        let protocol = self.to_snark_protocol()?;
+        let dk = self.snark_deciding_key()?;
+        let svk = dk.svk();
+        let instances = self.full_instances_as_halo_fr()?;
+        let committed_instances = self.committed_instances_as_halo_points()?;
+
+        let mut transcript = MidnightSnarkTranscript::init_from_bytes(&self.proof);
+        let proof = PlonkProof::<HaloG1Affine, NativeLoader, HaloAs>::read_with_committed_instances::<
+            _,
+            LimbsEncoding<{ crate::LIMBS }, { crate::BITS }>,
+        >(
+            &svk,
+            &protocol,
+            &instances,
+            Some(&committed_instances),
+            &mut transcript,
+        )
+        .map_err(|e| anyhow!("failed to parse midnight proof into snark-verifier proof: {e:?}"))?;
+
+        <crate::PlonkVerifier<HaloAs> as SnarkVerifier<HaloG1Affine, NativeLoader>>::verify(
+            &dk, &protocol, &instances, &proof,
+        )
+        .map_err(|e| anyhow!("snark-verifier full verification failed: {e:?}"))?;
+
+        Ok(())
+    }
+
     /// Convert non-committed instances into halo2-axiom `Fr`.
     ///
     /// This is useful for the remaining protocol/proof-level adapter work.
