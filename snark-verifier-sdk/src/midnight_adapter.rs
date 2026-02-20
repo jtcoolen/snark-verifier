@@ -489,6 +489,7 @@ struct MidnightProtocolBuilder<'a> {
     num_fixed: usize,
     num_permutation_fixed: usize,
     num_lookup_z: usize,
+    num_trash: usize,
     permutation_chunk_size: usize,
     num_permutation_z: usize,
 }
@@ -540,6 +541,7 @@ impl<'a> MidnightProtocolBuilder<'a> {
             num_fixed: cs.num_fixed_columns(),
             num_permutation_fixed,
             num_lookup_z: cs.lookups().len(),
+            num_trash: cs.trashcans().len(),
             permutation_chunk_size,
             num_permutation_z,
         }
@@ -585,6 +587,7 @@ impl<'a> MidnightProtocolBuilder<'a> {
             .chain(self.permutation_fixed_queries())
             .chain(self.permutation_z_queries(true))
             .chain(self.lookup_queries(true))
+            .chain(self.trash_queries())
             .collect_vec();
 
         let queries = committed_instance_queries
@@ -592,6 +595,7 @@ impl<'a> MidnightProtocolBuilder<'a> {
             .chain(advice_queries)
             .chain(self.permutation_z_queries(false))
             .chain(self.lookup_queries(false))
+            .chain(self.trash_queries())
             .chain(fixed_queries)
             .chain(self.permutation_fixed_queries())
             .chain(Some(self.quotient_query()))
@@ -645,22 +649,30 @@ impl<'a> MidnightProtocolBuilder<'a> {
         self.lookup_permuted_offset() + 2 * self.num_lookup_z
     }
 
-    fn random_poly_index(&self) -> usize {
+    fn trash_random_offset(&self) -> usize {
         self.perm_lookup_offset() + self.num_permutation_z + self.num_lookup_z
+    }
+
+    fn random_poly_index(&self) -> usize {
+        self.trash_random_offset() + self.num_trash
     }
 
     fn num_witness(&self) -> Vec<usize> {
         self.num_advice
             .iter()
             .copied()
-            .chain([2 * self.num_lookup_z, self.num_permutation_z + self.num_lookup_z, 1])
+            .chain([
+                2 * self.num_lookup_z,
+                self.num_permutation_z + self.num_lookup_z,
+                self.num_trash + 1,
+            ])
             .collect()
     }
 
     fn num_challenge_with_system(&self) -> Vec<usize> {
         let mut phase_challenges = self.num_challenge.clone();
         *phase_challenges.last_mut().unwrap() += 1; // theta
-        phase_challenges.into_iter().chain([2, 1]).collect()
+        phase_challenges.into_iter().chain([2, 1, 1]).collect()
     }
 
     fn system_challenge_offset(&self) -> usize {
@@ -679,8 +691,12 @@ impl<'a> MidnightProtocolBuilder<'a> {
         Expression::Challenge(self.system_challenge_offset() + 2)
     }
 
-    fn alpha(&self) -> Expression<HaloFr> {
+    fn trash_challenge(&self) -> Expression<HaloFr> {
         Expression::Challenge(self.system_challenge_offset() + 3)
+    }
+
+    fn alpha(&self) -> Expression<HaloFr> {
+        Expression::Challenge(self.system_challenge_offset() + 4)
     }
 
     fn rotation_last(&self) -> Rotation {
@@ -847,6 +863,14 @@ impl<'a> MidnightProtocolBuilder<'a> {
                 }
             })
             .collect()
+    }
+
+    fn trash_poly(&self, i: usize) -> usize {
+        self.trash_random_offset() + i
+    }
+
+    fn trash_queries(&self) -> Vec<Query> {
+        (0..self.num_trash).map(|i| Query::new(self.trash_poly(i), Rotation(0))).collect()
     }
 
     fn random_query(&self) -> Option<Query> {
