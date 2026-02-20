@@ -78,10 +78,7 @@ fn le_bytes_to_padded_be_words(bytes_le: &[u8]) -> [U256; 2] {
     let be = bytes_le.iter().rev().copied().collect_vec();
     let offset = BLS_ENCODED_FP_BYTES - be.len();
     padded[offset..].copy_from_slice(&be);
-    [
-        be_bytes_to_u256(&padded[..0x20]),
-        be_bytes_to_u256(&padded[0x20..BLS_ENCODED_FP_BYTES]),
-    ]
+    [be_bytes_to_u256(&padded[..0x20]), be_bytes_to_u256(&padded[0x20..BLS_ENCODED_FP_BYTES])]
 }
 
 impl EvmLoader {
@@ -196,8 +193,7 @@ impl EvmLoader {
             mstore({:#x}, 0)
             calldatacopy({:#x}, {x_cd_ptr:#x}, {coord_bytes:#x})
             calldatacopy({:#x}, {y_cd_ptr:#x}, {coord_bytes:#x})
-        }}"
-            ,
+        }}",
             x_ptr + 0x20,
             y_ptr + 0x20,
             x_ptr + pad,
@@ -402,11 +398,7 @@ impl EvmLoader {
         rhs: &EcPoint,
         minus_s_g2: &[U256],
     ) {
-        assert_eq!(
-            g2.len(),
-            BLS_G2_BYTES / 0x20,
-            "g2 must contain exactly 8 words (256 bytes)"
-        );
+        assert_eq!(g2.len(), BLS_G2_BYTES / 0x20, "g2 must contain exactly 8 words (256 bytes)");
         assert_eq!(
             minus_s_g2.len(),
             BLS_G2_BYTES / 0x20,
@@ -479,6 +471,9 @@ impl EvmLoader {
 
     fn neg(self: &Rc<Self>, scalar: &Scalar) -> Scalar {
         if let Value::Constant(constant) = scalar.value {
+            if constant == U256::ZERO {
+                return self.scalar(Value::Constant(U256::ZERO));
+            }
             return self.scalar(Value::Constant(self.scalar_modulus - constant));
         }
 
@@ -889,6 +884,15 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
     fn batch_invert<'a>(values: impl IntoIterator<Item = &'a mut Scalar>) {
         let values = values.into_iter().collect_vec();
         let loader = &values.first().unwrap().loader;
+        let fast_unrolled =
+            std::env::var("MIDNIGHT_EVM_FAST_BATCH_INVERT").map(|v| v == "1").unwrap_or(false);
+        if !fast_unrolled {
+            values.into_iter().for_each(|value| {
+                *value = FieldOps::invert(&*value).unwrap_or_else(|| value.clone())
+            });
+            return;
+        }
+
         let products = iter::once(values[0].clone())
             .chain(
                 iter::repeat_with(|| loader.allocate(0x20))
