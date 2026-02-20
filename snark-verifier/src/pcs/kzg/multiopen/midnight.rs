@@ -249,7 +249,7 @@ where
     }
 
     let num_x1_powers = q_coms.iter().map(|set| set.len()).max().unwrap_or_default();
-    let powers_x1 = proof.x1.powers(num_x1_powers);
+    let powers_x1 = loader.powers_with_challenge_policy(&proof.x1, num_x1_powers);
     let q_coms = q_coms
         .into_iter()
         .map(|msms| {
@@ -360,7 +360,7 @@ where
     //   e(lhs, g2) * e(rhs, -s_g2) == 1
     // so map lhs <- right term, rhs <- left term.
     let rhs = Msm::base(&proof.pi);
-    let lhs = final_com + rhs.clone() * &proof.x3 - Msm::constant(v);
+    let lhs = final_com + rhs.clone() * &x3 - Msm::constant(v);
     Ok(KzgAccumulator::new(lhs.evaluate(Some(svk.g)), rhs.evaluate(Some(svk.g))))
 }
 
@@ -436,52 +436,6 @@ where
         }
     }
     result
-}
-
-fn lagrange_interpolate_eval_loaded<C, L>(
-    points: &[L::LoadedScalar],
-    evals: &[L::LoadedScalar],
-    at: &L::LoadedScalar,
-) -> Result<L::LoadedScalar, Error>
-where
-    C: CurveAffine,
-    L: Loader<C>,
-{
-    if points.len() != evals.len() {
-        return Err(Error::InvalidProtocol(format!(
-            "lagrange interpolation size mismatch: points={}, evals={}",
-            points.len(),
-            evals.len()
-        )));
-    }
-    let loader = at.loader().clone();
-    if points.is_empty() {
-        return Ok(loader.load_zero());
-    }
-    if points.len() == 1 {
-        return Ok(evals[0].clone());
-    }
-
-    let mut denom = (0..points.len())
-        .map(|j| {
-            points
-                .iter()
-                .enumerate()
-                .filter(|(k, _)| *k != j)
-                .fold(loader.load_one(), |acc, (_, x_k)| acc * &(points[j].clone() - x_k))
-        })
-        .collect_vec();
-    <L as ScalarLoader<C::ScalarExt>>::batch_invert(denom.iter_mut());
-
-    let value = evals.iter().enumerate().fold(loader.load_zero(), |acc, (j, eval)| {
-        let numer = points
-            .iter()
-            .enumerate()
-            .filter(|(k, _)| *k != j)
-            .fold(loader.load_one(), |acc, (_, point)| acc * &(at.clone() - point));
-        acc + eval.clone() * &numer * &denom[j]
-    });
-    Ok(value)
 }
 
 impl<M> CostEstimation<M::G1Affine> for KzgAs<M, Midnight>
