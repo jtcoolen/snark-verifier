@@ -7,7 +7,7 @@ use crate::{
         EcPointLoader, LoadedEcPoint, LoadedScalar, Loader, ScalarLoader,
     },
     util::{
-        arithmetic::{CurveAffine, FieldOps, PrimeField},
+        arithmetic::{Coordinates, CurveAffine, FieldOps, PrimeField},
         Itertools,
     },
 };
@@ -78,10 +78,7 @@ fn le_bytes_to_padded_be_words(bytes_le: &[u8]) -> [U256; 2] {
     let be = bytes_le.iter().rev().copied().collect_vec();
     let offset = BLS_ENCODED_FP_BYTES - be.len();
     padded[offset..].copy_from_slice(&be);
-    [
-        be_bytes_to_u256(&padded[..0x20]),
-        be_bytes_to_u256(&padded[0x20..BLS_ENCODED_FP_BYTES]),
-    ]
+    [be_bytes_to_u256(&padded[..0x20]), be_bytes_to_u256(&padded[0x20..BLS_ENCODED_FP_BYTES])]
 }
 
 impl EvmLoader {
@@ -196,8 +193,7 @@ impl EvmLoader {
             mstore({:#x}, 0)
             calldatacopy({:#x}, {x_cd_ptr:#x}, {coord_bytes:#x})
             calldatacopy({:#x}, {y_cd_ptr:#x}, {coord_bytes:#x})
-        }}"
-            ,
+        }}",
             x_ptr + 0x20,
             y_ptr + 0x20,
             x_ptr + pad,
@@ -306,6 +302,25 @@ impl EvmLoader {
         self.scalar(Value::Memory(ptr))
     }
 
+    /// Truncate a scalar to its low 128 bits.
+    ///
+    /// This is used by Midnight's optional `truncated-challenges` mode.
+    #[cfg(feature = "truncated-challenges")]
+    pub fn truncate_scalar_to_128(self: &Rc<Self>, scalar: &Scalar) -> Scalar {
+        let mask = U256::from(u128::MAX);
+        if let Value::Constant(constant) = scalar.value {
+            return self.scalar(Value::Constant(constant & mask));
+        }
+
+        let ptr = self.allocate(0x20);
+        self.copy_scalar(scalar, ptr);
+        let mask_hex = hex_encode_u256(&mask);
+        self.code
+            .borrow_mut()
+            .runtime_append(format!("mstore({ptr:#x}, and(mload({ptr:#x}), {mask_hex}))"));
+        self.scalar(Value::Memory(ptr))
+    }
+
     /// Allocates a new elliptic curve point and copies the given value into it.
     pub fn dup_ec_point(self: &Rc<Self>, value: &EcPoint) -> EcPoint {
         let ptr = self.allocate(BLS_G1_BYTES);
@@ -383,11 +398,7 @@ impl EvmLoader {
         rhs: &EcPoint,
         minus_s_g2: &[U256],
     ) {
-        assert_eq!(
-            g2.len(),
-            BLS_G2_BYTES / 0x20,
-            "g2 must contain exactly 8 words (256 bytes)"
-        );
+        assert_eq!(g2.len(), BLS_G2_BYTES / 0x20, "g2 must contain exactly 8 words (256 bytes)");
         assert_eq!(
             minus_s_g2.len(),
             BLS_G2_BYTES / 0x20,
@@ -460,6 +471,9 @@ impl EvmLoader {
 
     fn neg(self: &Rc<Self>, scalar: &Scalar) -> Scalar {
         if let Value::Constant(constant) = scalar.value {
+            if constant == U256::ZERO {
+                return self.scalar(Value::Constant(U256::ZERO));
+            }
             return self.scalar(Value::Constant(self.scalar_modulus - constant));
         }
 
@@ -689,9 +703,12 @@ where
     type LoadedEcPoint = EcPoint;
 
     fn ec_point_load_const(&self, value: &C) -> EcPoint {
-        let coordinates = value.coordinates().unwrap();
-        let [x_words, y_words] = [coordinates.x(), coordinates.y()]
-            .map(|coordinate| le_bytes_to_padded_be_words(coordinate.to_repr().as_ref()));
+        let [x_words, y_words] = match Option::<Coordinates<C>>::from(value.coordinates()) {
+            Some(coordinates) => [coordinates.x(), coordinates.y()]
+                .map(|coordinate| le_bytes_to_padded_be_words(coordinate.to_repr().as_ref())),
+            // EVM precompiles encode point-at-infinity as (0, 0).
+            None => [[U256::ZERO, U256::ZERO], [U256::ZERO, U256::ZERO]],
+        };
 
         let ptr = self.allocate(BLS_G1_BYTES);
         let code = format!(
@@ -867,6 +884,15 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
     fn batch_invert<'a>(values: impl IntoIterator<Item = &'a mut Scalar>) {
         let values = values.into_iter().collect_vec();
         let loader = &values.first().unwrap().loader;
+        let fast_unrolled =
+            std::env::var("MIDNIGHT_EVM_FAST_BATCH_INVERT").map(|v| v == "1").unwrap_or(false);
+        if !fast_unrolled {
+            values.into_iter().for_each(|value| {
+                *value = FieldOps::invert(&*value).unwrap_or_else(|| value.clone())
+            });
+            return;
+        }
+
         let products = iter::once(values[0].clone())
             .chain(
                 iter::repeat_with(|| loader.allocate(0x20))
