@@ -572,12 +572,14 @@ impl<'a> MidnightProtocolBuilder<'a> {
             .cloned()
             .map(midnight_g1_to_halo_affine)
             .collect::<Result<Vec<_>>>()?;
+        let committed_instance_queries = self.committed_instance_queries();
         let advice_queries = self.advice_queries()?;
         let fixed_queries = self.fixed_queries();
 
         let evaluations = self
-            .advice_queries()?
+            .committed_instance_queries()
             .into_iter()
+            .chain(advice_queries.clone())
             .chain(fixed_queries.clone())
             .chain(self.random_query())
             .chain(self.permutation_fixed_queries())
@@ -585,8 +587,9 @@ impl<'a> MidnightProtocolBuilder<'a> {
             .chain(self.lookup_queries(true))
             .collect_vec();
 
-        let queries = advice_queries
+        let queries = committed_instance_queries
             .into_iter()
+            .chain(advice_queries)
             .chain(self.permutation_z_queries(false))
             .chain(self.lookup_queries(false))
             .chain(fixed_queries)
@@ -604,8 +607,8 @@ impl<'a> MidnightProtocolBuilder<'a> {
             num_instance: self.num_instance.clone(),
             num_witness: self.num_witness(),
             num_challenge: self.num_challenge_with_system(),
-            committed_instance_count: 0,
-            hash_instance_lengths: false,
+            committed_instance_count: self.committed_instance_count,
+            hash_instance_lengths: true,
             trailing_challenges: 0,
             extra_commitments: 0,
             evaluations,
@@ -747,6 +750,15 @@ impl<'a> MidnightProtocolBuilder<'a> {
                 Ok(self.convert_expression(a)? * midnight_fq_to_halo_fr(*scalar)?)
             }
         }
+    }
+
+    fn committed_instance_queries(&self) -> Vec<Query> {
+        self.cs
+            .instance_queries()
+            .iter()
+            .filter(|(column, _)| column.index() < self.committed_instance_count)
+            .map(|(column, rotation)| self.query(Any::Instance, column.index(), *rotation))
+            .collect()
     }
 
     fn advice_queries(&self) -> Result<Vec<Query>> {
