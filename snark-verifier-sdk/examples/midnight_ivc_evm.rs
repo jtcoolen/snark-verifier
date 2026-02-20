@@ -79,10 +79,7 @@ fn extract_revm_gas(message: &str) -> Option<u64> {
 fn run_revm_enabled() -> bool {
     std::env::var("RUN_REVM")
         .map(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "y" | "on"
-            )
+            matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "y" | "on")
         })
         .unwrap_or(false)
 }
@@ -518,11 +515,8 @@ fn main() {
     let sharded_dispatcher_initcode_bytes = unrolled_sharded.dispatcher_deployment_code.len();
     let sharded_shard_runtime_sizes =
         unrolled_sharded.shard_runtime_codes.iter().map(|code| code.len()).collect::<Vec<_>>();
-    let sharded_shard_initcode_sizes = unrolled_sharded
-        .shard_deployment_codes
-        .iter()
-        .map(|code| code.len())
-        .collect::<Vec<_>>();
+    let sharded_shard_initcode_sizes =
+        unrolled_sharded.shard_deployment_codes.iter().map(|code| code.len()).collect::<Vec<_>>();
     let sharded_dispatcher_runtime_within_limit =
         sharded_dispatcher_runtime_bytes <= EIP170_RUNTIME_CODE_SIZE_LIMIT_BYTES;
     let sharded_dispatcher_initcode_within_limit =
@@ -530,9 +524,8 @@ fn main() {
     let sharded_all_shards_runtime_within_limit = sharded_shard_runtime_sizes
         .iter()
         .all(|size| *size <= EIP170_RUNTIME_CODE_SIZE_LIMIT_BYTES);
-    let sharded_all_shards_initcode_within_limit = sharded_shard_initcode_sizes
-        .iter()
-        .all(|size| *size <= EIP3860_INITCODE_SIZE_LIMIT_BYTES);
+    let sharded_all_shards_initcode_within_limit =
+        sharded_shard_initcode_sizes.iter().all(|size| *size <= EIP3860_INITCODE_SIZE_LIMIT_BYTES);
     let calldata = bundle.encode_evm_calldata().expect("failed to encode EVM calldata");
     let unrolled_runtime_within_limit =
         runtime_bytecode.len() <= EIP170_RUNTIME_CODE_SIZE_LIMIT_BYTES;
@@ -559,8 +552,7 @@ fn main() {
         out_dir.join("midnight_ivc_unrolled_sharded_dispatcher.bytecode");
     let unrolled_sharded_shards_path =
         out_dir.join("midnight_ivc_unrolled_sharded_shards.bytecode");
-    let unrolled_sharded_manifest_path =
-        out_dir.join("midnight_ivc_unrolled_sharded_manifest.txt");
+    let unrolled_sharded_manifest_path = out_dir.join("midnight_ivc_unrolled_sharded_manifest.txt");
     let bench_summary_path = out_dir.join("midnight_ivc_bench.json");
 
     std::fs::write(&solidity_path, &solidity).expect("failed to write Solidity verifier");
@@ -680,31 +672,17 @@ fn main() {
         "hybrid total deployed runtime code bytes (verifier + pages): {}",
         hybrid_total_deployed_code
     );
-    println!(
-        "unrolled-sharded dispatcher runtime bytes: {}",
-        sharded_dispatcher_runtime_bytes
-    );
-    println!(
-        "unrolled-sharded dispatcher initcode bytes: {}",
-        sharded_dispatcher_initcode_bytes
-    );
-    println!(
-        "unrolled-sharded shard runtime sizes (bytes): {:?}",
-        sharded_shard_runtime_sizes
-    );
-    println!(
-        "unrolled-sharded shard initcode sizes (bytes): {:?}",
-        sharded_shard_initcode_sizes
-    );
+    println!("unrolled-sharded dispatcher runtime bytes: {}", sharded_dispatcher_runtime_bytes);
+    println!("unrolled-sharded dispatcher initcode bytes: {}", sharded_dispatcher_initcode_bytes);
+    println!("unrolled-sharded shard runtime sizes (bytes): {:?}", sharded_shard_runtime_sizes);
+    println!("unrolled-sharded shard initcode sizes (bytes): {:?}", sharded_shard_initcode_sizes);
     println!(
         "unrolled-sharded dispatcher runtime deployable (EIP-170 <= {}): {}",
-        EIP170_RUNTIME_CODE_SIZE_LIMIT_BYTES,
-        sharded_dispatcher_runtime_within_limit
+        EIP170_RUNTIME_CODE_SIZE_LIMIT_BYTES, sharded_dispatcher_runtime_within_limit
     );
     println!(
         "unrolled-sharded dispatcher initcode deployable (EIP-3860 <= {}): {}",
-        EIP3860_INITCODE_SIZE_LIMIT_BYTES,
-        sharded_dispatcher_initcode_within_limit
+        EIP3860_INITCODE_SIZE_LIMIT_BYTES, sharded_dispatcher_initcode_within_limit
     );
     println!(
         "unrolled-sharded shard runtime deployable (all): {}",
@@ -878,10 +856,7 @@ fn main() {
                     metrics.deployment_gas()
                 );
                 println!("revm unrolled-sharded gas: {}", metrics.call_gas);
-                println!(
-                    "proof verification gas (unrolled-sharded call): {}",
-                    metrics.call_gas
-                );
+                println!("proof verification gas (unrolled-sharded call): {}", metrics.call_gas);
                 revm_unrolled_sharded = json!({
                     "status": "ok",
                     "deployment_gas": metrics.deployment_gas(),

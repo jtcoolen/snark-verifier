@@ -28,69 +28,70 @@ const UTXO_NULLIFY_TAG: u64 = 0x0002;
 const AMOUNT_BITS: u32 = 128;
 pub(crate) const AMOUNT_GEN_BITS: u32 = 120;
 
-pub(crate) const CLIENT_PUBLIC_ITEMS_WIDTH: usize = 19;
+pub(crate) const CLIENT_PUBLIC_ITEMS_WIDTH: usize = 21;
 
-/// Typed encoding for the 19 public items in client proofs.
+/// Typed encoding for the 21 public items in client proofs.
 ///
 /// Canonical order:
-/// [roots[0], roots[1], roots[2], roots[3], pk_bx, pk_by, new_comms[0], new_comms[1],
-/// new_comms[2], new_comms[3], nfs[0], nfs[1], nfs[2], nfs[3],
-/// comp_secs[0], comp_secs[1], comp_secs[2], comp_secs[3], comp_secs[4]].
-#[derive(Clone, Debug)]
-pub struct ClientPublicItems<T> {
-    /// Historic roots the client is using.
+/// [fee, roots[0], roots[1], roots[2], roots[3], commitments[0], commitments[1],
+/// commitments[2], commitments[3], nullifiers[0], nullifiers[1], nullifiers[2], nullifiers[3],
+/// compressed_secrets[0], compressed_secrets[1], compressed_secrets[2], compressed_secrets[3],
+/// compressed_secrets[4], swap_link, deadline, swap_side].
+#[derive(Debug, Clone, Copy)]
+pub struct PublicInputs<T> {
+    pub fee: T,
     pub roots: [T; 4],
-    /// Sender public-key x-coordinate.
-    pub pk_bx: T,
-    /// Sender public-key y-coordinate.
-    pub pk_by: T,
-    /// New commitments created by the client transaction.
-    pub new_comms: [T; 4],
-    /// Nullifiers consumed by the client transaction.
-    pub nfs: [T; 4],
-    /// Compressed secrets.
-    pub comp_secs: [T; 5],
+    pub commitments: [T; 4],
+    pub nullifiers: [T; 4],
+    pub compressed_secrets: [T; 5],
+    pub swap_link: T,
+    pub deadline: T,
+    pub swap_side: T,
 }
 
-impl<T> From<[T; CLIENT_PUBLIC_ITEMS_WIDTH]> for ClientPublicItems<T> {
+impl<T> From<[T; CLIENT_PUBLIC_ITEMS_WIDTH]> for PublicInputs<T> {
     fn from(arr: [T; CLIENT_PUBLIC_ITEMS_WIDTH]) -> Self {
-        let [root0, root1, root2, root3, pk_bx, pk_by, new_comm0, new_comm1, new_comm2, new_comm3, nf0, nf1, nf2, nf3, comp_sec0, comp_sec1, comp_sec2, comp_sec3, comp_sec4] =
+        let [fee, root0, root1, root2, root3, commitment0, commitment1, commitment2, commitment3, nullifier0, nullifier1, nullifier2, nullifier3, comp_sec0, comp_sec1, comp_sec2, comp_sec3, comp_sec4, swap_link, deadline, swap_side] =
             arr;
 
         Self {
+            fee,
             roots: [root0, root1, root2, root3],
-            pk_bx,
-            pk_by,
-            new_comms: [new_comm0, new_comm1, new_comm2, new_comm3],
-            nfs: [nf0, nf1, nf2, nf3],
-            comp_secs: [comp_sec0, comp_sec1, comp_sec2, comp_sec3, comp_sec4],
+            commitments: [commitment0, commitment1, commitment2, commitment3],
+            nullifiers: [nullifier0, nullifier1, nullifier2, nullifier3],
+            compressed_secrets: [comp_sec0, comp_sec1, comp_sec2, comp_sec3, comp_sec4],
+            swap_link,
+            deadline,
+            swap_side,
         }
     }
 }
 
-impl<T: Clone> ClientPublicItems<T> {
+impl<T: Clone> PublicInputs<T> {
     #[inline]
     pub fn as_array(&self) -> [T; CLIENT_PUBLIC_ITEMS_WIDTH] {
         [
+            self.fee.clone(),
             self.roots[0].clone(),
             self.roots[1].clone(),
             self.roots[2].clone(),
             self.roots[3].clone(),
-            self.pk_bx.clone(),
-            self.pk_by.clone(),
-            self.new_comms[0].clone(),
-            self.new_comms[1].clone(),
-            self.new_comms[2].clone(),
-            self.new_comms[3].clone(),
-            self.nfs[0].clone(),
-            self.nfs[1].clone(),
-            self.nfs[2].clone(),
-            self.nfs[3].clone(),
-            self.comp_secs[0].clone(),
-            self.comp_secs[1].clone(),
-            self.comp_secs[2].clone(),
-            self.comp_secs[3].clone(),
-            self.comp_secs[4].clone(),
+            self.commitments[0].clone(),
+            self.commitments[1].clone(),
+            self.commitments[2].clone(),
+            self.commitments[3].clone(),
+            self.nullifiers[0].clone(),
+            self.nullifiers[1].clone(),
+            self.nullifiers[2].clone(),
+            self.nullifiers[3].clone(),
+            self.compressed_secrets[0].clone(),
+            self.compressed_secrets[1].clone(),
+            self.compressed_secrets[2].clone(),
+            self.compressed_secrets[3].clone(),
+            self.compressed_secrets[4].clone(),
+            self.swap_link.clone(),
+            self.deadline.clone(),
+            self.swap_side.clone(),
         ]
     }
 
@@ -100,17 +101,19 @@ impl<T: Clone> ClientPublicItems<T> {
     }
 }
 
-pub(crate) type Spend2Output2PublicInputs = ClientPublicItems<F>;
+pub(crate) type Spend2Output2PublicInputs = PublicInputs<F>;
 
-impl Default for ClientPublicItems<F> {
+impl Default for PublicInputs<F> {
     fn default() -> Self {
         Self {
+            fee: F::ZERO,
             roots: [F::ZERO; 4],
-            pk_bx: F::ZERO,
-            pk_by: F::ZERO,
-            new_comms: [F::ZERO; 4],
-            nfs: [F::ZERO; 4],
-            comp_secs: [F::ZERO; 5],
+            commitments: [F::ZERO; 4],
+            nullifiers: [F::ZERO; 4],
+            compressed_secrets: [F::ZERO; 5],
+            swap_link: F::ZERO,
+            deadline: F::ZERO,
+            swap_side: F::ZERO,
         }
     }
 }
@@ -176,8 +179,7 @@ impl Relation for Spend2Output2 {
             std_lib.jubjub().convert(layouter, &alpha_native_value)?;
         let blind = std_lib.jubjub().mul(layouter, &alpha, &generator)?;
         let pk_blinded = std_lib.jubjub().add(layouter, &pk_sender, &blind)?;
-        let pk_blinded_fields = std_lib.jubjub().as_public_input(layouter, &pk_blinded)?;
-        let (pk_bx, pk_by) = (pk_blinded_fields[0].clone(), pk_blinded_fields[1].clone());
+        let _pk_blinded_fields = std_lib.jubjub().as_public_input(layouter, &pk_blinded)?;
 
         let old1_asg = assign_utxo(std_lib, layouter, &old1_val)?;
         let old2_asg = assign_utxo(std_lib, layouter, &old2_val)?;
@@ -221,29 +223,35 @@ impl Relation for Spend2Output2 {
             std_lib, layouter, &old1_asg, &old2_asg, &new1_asg, &new2_asg,
         )?;
 
-        // Public items are encoded with padding for 19 canonical slots.
+        // Public items are encoded with padding for 21 canonical slots.
         let pi_zero: AssignedNative<F> = std_lib.assign_fixed(layouter, F::ZERO)?;
 
+        let fee = pi_zero.clone();
         let roots = [root.clone(), root.clone(), root.clone(), root];
-        let new_comms = [new_c1.clone(), new_c2.clone(), pi_zero.clone(), pi_zero.clone()];
-        let nfs = [nf1.clone(), nf2.clone(), pi_zero.clone(), pi_zero.clone()];
-        let comp_secs =
+        let commitments = [new_c1.clone(), new_c2.clone(), pi_zero.clone(), pi_zero.clone()];
+        let nullifiers = [nf1.clone(), nf2.clone(), pi_zero.clone(), pi_zero.clone()];
+        let compressed_secrets =
             [pi_zero.clone(), pi_zero.clone(), pi_zero.clone(), pi_zero.clone(), pi_zero.clone()];
+        let swap_link = pi_zero.clone();
+        let deadline = pi_zero.clone();
+        let swap_side = pi_zero;
 
+        std_lib.constrain_as_public_input(layouter, &fee)?;
         for r in roots {
             std_lib.constrain_as_public_input(layouter, &r)?;
         }
-        std_lib.constrain_as_public_input(layouter, &pk_bx)?;
-        std_lib.constrain_as_public_input(layouter, &pk_by)?;
-        for c in new_comms {
+        for c in commitments {
             std_lib.constrain_as_public_input(layouter, &c)?;
         }
-        for n in nfs {
+        for n in nullifiers {
             std_lib.constrain_as_public_input(layouter, &n)?;
         }
-        for sec in comp_secs {
+        for sec in compressed_secrets {
             std_lib.constrain_as_public_input(layouter, &sec)?;
         }
+        std_lib.constrain_as_public_input(layouter, &swap_link)?;
+        std_lib.constrain_as_public_input(layouter, &deadline)?;
+        std_lib.constrain_as_public_input(layouter, &swap_side)?;
 
         Ok(())
     }
@@ -522,8 +530,7 @@ mod tests {
             }
         };
 
-        let pk_blinded = pk_sender + (JubjubSubgroup::generator() * alpha_scalar);
-        let (pk_bx, pk_by) = jubjub_fields(&pk_blinded);
+        let _pk_blinded = pk_sender + (JubjubSubgroup::generator() * alpha_scalar);
 
         // Asset id shared by all utxos
         let asset_id = F::random(&mut rng);
@@ -577,12 +584,14 @@ mod tests {
         let nf2 = host_nullify(old_c2, pk_sx, pk_sy);
 
         let instance = Spend2Output2PublicInputs {
+            fee: F::ZERO,
             roots: [root; 4],
-            pk_bx,
-            pk_by,
-            new_comms: [new_c1, new_c2, F::ZERO, F::ZERO],
-            nfs: [nf1, nf2, F::ZERO, F::ZERO],
-            comp_secs: [F::ZERO; 5],
+            commitments: [new_c1, new_c2, F::ZERO, F::ZERO],
+            nullifiers: [nf1, nf2, F::ZERO, F::ZERO],
+            compressed_secrets: [F::ZERO; 5],
+            swap_link: F::ZERO,
+            deadline: F::ZERO,
+            swap_side: F::ZERO,
         };
 
         let witness = (commit_map, sk, alpha_f, old1, old2, new1, new2, pk1_out, pk2_out);
@@ -725,12 +734,11 @@ mod tests {
     }
 
     #[test]
-    fn negative_public_input_tamper_pk_blinded_is_rejected() {
+    fn negative_public_input_tamper_fee_is_rejected() {
         let seed = 1008;
         let (mut instance, witness) = make_valid_case(seed);
 
-        instance.pk_bx = F::random(&mut ChaCha8Rng::seed_from_u64(123));
-        // (pk_by unchanged) still should fail because circuit constrains both coords
+        instance.fee = F::random(&mut ChaCha8Rng::seed_from_u64(123));
         assert!(rejects(&instance, witness, seed));
     }
 
@@ -739,7 +747,7 @@ mod tests {
         let seed = 1009;
         let (mut instance, witness) = make_valid_case(seed);
 
-        instance.new_comms[0] = F::random(&mut ChaCha8Rng::seed_from_u64(321));
+        instance.commitments[0] = F::random(&mut ChaCha8Rng::seed_from_u64(321));
         assert!(rejects(&instance, witness, seed));
     }
 
@@ -748,7 +756,7 @@ mod tests {
         let seed = 1010;
         let (mut instance, witness) = make_valid_case(seed);
 
-        instance.nfs[1] = F::random(&mut ChaCha8Rng::seed_from_u64(777));
+        instance.nullifiers[1] = F::random(&mut ChaCha8Rng::seed_from_u64(777));
         assert!(rejects(&instance, witness, seed));
     }
 }

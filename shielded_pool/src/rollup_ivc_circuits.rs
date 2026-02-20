@@ -220,33 +220,38 @@ pub fn configure_agg_circuit(meta: &mut ConstraintSystem<F>) -> AggCircuitConfig
 // Encodings (struct <-> array)
 ////////////////////////////////////////////////////////////////////////////////
 
-/// Typed encoding for the 19 public items in client proofs.
+/// Typed encoding for the 21 public items in client proofs.
 ///
 /// Canonical order:
-/// [roots[0], roots[1], roots[2], roots[3], pk_bx, pk_by, new_comms[0], new_comms[1],
-/// new_comms[2], new_comms[3], nfs[0], nfs[1], nfs[2], nfs[3],
-/// comp_secs[0], comp_secs[1], comp_secs[2], comp_secs[3], comp_secs[4]].
+/// [fee, roots[0], roots[1], roots[2], roots[3], commitments[0], commitments[1],
+/// commitments[2], commitments[3], nullifiers[0], nullifiers[1], nullifiers[2], nullifiers[3],
+/// compressed_secrets[0], compressed_secrets[1], compressed_secrets[2], compressed_secrets[3],
+/// compressed_secrets[4], swap_link, deadline, swap_side].
 #[derive(Clone, Debug)]
 pub struct ClientPublicItems<T> {
+    pub fee: T,
     pub roots: [T; 4],
-    pub pk_bx: T,
-    pub pk_by: T,
-    pub new_comms: [T; 4],
-    pub nfs: [T; 4],
-    pub comp_secs: [T; 5],
+    pub commitments: [T; 4],
+    pub nullifiers: [T; 4],
+    pub compressed_secrets: [T; 5],
+    pub swap_link: T,
+    pub deadline: T,
+    pub swap_side: T,
 }
 
 impl<T> From<[T; CLIENT_ITEMS_WIDTH]> for ClientPublicItems<T> {
     fn from(arr: [T; CLIENT_ITEMS_WIDTH]) -> Self {
-        let [root0, root1, root2, root3, pk_bx, pk_by, new_comm0, new_comm1, new_comm2, new_comm3, nf0, nf1, nf2, nf3, comp_sec0, comp_sec1, comp_sec2, comp_sec3, comp_sec4] =
+        let [fee, root0, root1, root2, root3, commitment0, commitment1, commitment2, commitment3, nullifier0, nullifier1, nullifier2, nullifier3, comp_sec0, comp_sec1, comp_sec2, comp_sec3, comp_sec4, swap_link, deadline, swap_side] =
             arr;
         Self {
+            fee,
             roots: [root0, root1, root2, root3],
-            pk_bx,
-            pk_by,
-            new_comms: [new_comm0, new_comm1, new_comm2, new_comm3],
-            nfs: [nf0, nf1, nf2, nf3],
-            comp_secs: [comp_sec0, comp_sec1, comp_sec2, comp_sec3, comp_sec4],
+            commitments: [commitment0, commitment1, commitment2, commitment3],
+            nullifiers: [nullifier0, nullifier1, nullifier2, nullifier3],
+            compressed_secrets: [comp_sec0, comp_sec1, comp_sec2, comp_sec3, comp_sec4],
+            swap_link,
+            deadline,
+            swap_side,
         }
     }
 }
@@ -255,25 +260,27 @@ impl<T: Clone> ClientPublicItems<T> {
     #[inline]
     pub fn as_array(&self) -> [T; CLIENT_ITEMS_WIDTH] {
         [
+            self.fee.clone(),
             self.roots[0].clone(),
             self.roots[1].clone(),
             self.roots[2].clone(),
             self.roots[3].clone(),
-            self.pk_bx.clone(),
-            self.pk_by.clone(),
-            self.new_comms[0].clone(),
-            self.new_comms[1].clone(),
-            self.new_comms[2].clone(),
-            self.new_comms[3].clone(),
-            self.nfs[0].clone(),
-            self.nfs[1].clone(),
-            self.nfs[2].clone(),
-            self.nfs[3].clone(),
-            self.comp_secs[0].clone(),
-            self.comp_secs[1].clone(),
-            self.comp_secs[2].clone(),
-            self.comp_secs[3].clone(),
-            self.comp_secs[4].clone(),
+            self.commitments[0].clone(),
+            self.commitments[1].clone(),
+            self.commitments[2].clone(),
+            self.commitments[3].clone(),
+            self.nullifiers[0].clone(),
+            self.nullifiers[1].clone(),
+            self.nullifiers[2].clone(),
+            self.nullifiers[3].clone(),
+            self.compressed_secrets[0].clone(),
+            self.compressed_secrets[1].clone(),
+            self.compressed_secrets[2].clone(),
+            self.compressed_secrets[3].clone(),
+            self.compressed_secrets[4].clone(),
+            self.swap_link.clone(),
+            self.deadline.clone(),
+            self.swap_side.clone(),
         ]
     }
 
@@ -291,12 +298,12 @@ impl<T> ClientPublicItems<T> {
 
     #[inline]
     pub fn applied_commitments(&self) -> impl Iterator<Item = &T> {
-        self.new_comms.iter().take(2)
+        self.commitments.iter().take(2)
     }
 
     #[inline]
     pub fn applied_nullifiers(&self) -> impl Iterator<Item = &T> {
-        self.nfs.iter().take(2)
+        self.nullifiers.iter().take(2)
     }
 }
 
@@ -510,16 +517,18 @@ fn assign_client_items(
     layouter: &mut impl Layouter<F>,
     items: Value<[F; CLIENT_ITEMS_WIDTH]>,
 ) -> Result<ClientPublicItems<AssignedNative<F>>, Error> {
-    let [root0, root1, root2, root3, pk_bx, pk_by, new_comm0, new_comm1, new_comm2, new_comm3, nf0, nf1, nf2, nf3, comp_sec0, comp_sec1, comp_sec2, comp_sec3, comp_sec4] =
+    let [fee, root0, root1, root2, root3, commitment0, commitment1, commitment2, commitment3, nullifier0, nullifier1, nullifier2, nullifier3, comp_sec0, comp_sec1, comp_sec2, comp_sec3, comp_sec4, swap_link, deadline, swap_side] =
         assign_values(ctx, layouter, project_value_array(items))?;
 
     Ok(ClientPublicItems {
+        fee,
         roots: [root0, root1, root2, root3],
-        pk_bx,
-        pk_by,
-        new_comms: [new_comm0, new_comm1, new_comm2, new_comm3],
-        nfs: [nf0, nf1, nf2, nf3],
-        comp_secs: [comp_sec0, comp_sec1, comp_sec2, comp_sec3, comp_sec4],
+        commitments: [commitment0, commitment1, commitment2, commitment3],
+        nullifiers: [nullifier0, nullifier1, nullifier2, nullifier3],
+        compressed_secrets: [comp_sec0, comp_sec1, comp_sec2, comp_sec3, comp_sec4],
+        swap_link,
+        deadline,
+        swap_side,
     })
 }
 
@@ -625,8 +634,8 @@ pub fn base_step(
             commitment_roots_set_root,
             block_level: blk_assigned,
         },
-        left.as_vec(),  // <-- verify client proof with its 19 unhashed public inputs
-        right.as_vec(), // <-- verify client proof with its 19 unhashed public inputs
+        left.as_vec(),  // <-- verify client proof with its 21 unhashed public inputs
+        right.as_vec(), // <-- verify client proof with its 21 unhashed public inputs
     ))
 }
 

@@ -1960,11 +1960,12 @@ fn host_instance_hash(items: [F; rollup_ivc_circuits::CLIENT_ITEMS_WIDTH]) -> F 
 
 /// Host-side Keccak Merkle hash over flattened L2 block metadata.
 ///
-/// Metadata layout is `N` rows of width 19:
-/// `[roots[0], roots[1], roots[2], roots[3], pk_bx, pk_by, new_comms[0], new_comms[1],
-/// new_comms[2], new_comms[3], nfs[0], nfs[1], nfs[2], nfs[3],
-/// comp_secs[0], comp_secs[1], comp_secs[2], comp_secs[3], comp_secs[4]]`.
-/// Leaves are `keccak256(abi.encodePacked(row[0], ..., row[18]))`.
+/// Metadata layout is `N` rows of width 21:
+/// `[fee, roots[0], roots[1], roots[2], roots[3], commitments[0], commitments[1],
+/// commitments[2], commitments[3], nullifiers[0], nullifiers[1], nullifiers[2], nullifiers[3],
+/// compressed_secrets[0], compressed_secrets[1], compressed_secrets[2], compressed_secrets[3],
+/// compressed_secrets[4], swap_link, deadline, swap_side]`.
+/// Leaves are `keccak256(abi.encodePacked(row[0], ..., row[20]))`.
 /// Internal nodes are `keccak256(left || right)` with right duplicated when odd.
 fn l2_metadata_merkle_hash(metadata: &[F]) -> Result<F, AppError> {
     const METADATA_WIDTH: usize = rollup_ivc_circuits::CLIENT_ITEMS_WIDTH;
@@ -2102,17 +2103,8 @@ fn random_amount(rng: &mut ChaCha8Rng) -> u128 {
     rng.r#gen::<u128>() >> (128 - transfer_circuit::AMOUNT_GEN_BITS)
 }
 
-fn blind_pubkey(sender_pk: JubjubSubgroup, alpha: JubjubScalar) -> (JubjubSubgroup, F, F) {
-    let blind_point = JubjubSubgroup::generator() * alpha;
-    let pk_blinded_point = sender_pk + blind_point;
-    let fields = AssignedNativePoint::<Jubjub>::as_public_input(&pk_blinded_point);
-    (pk_blinded_point, fields[0], fields[1])
-}
-
 fn build_public_items(
     root_before: F,
-    pk_bx: F,
-    pk_by: F,
     new1_commit: F,
     new2_commit: F,
     nf1: F,
@@ -2120,12 +2112,14 @@ fn build_public_items(
 ) -> ([F; rollup_ivc_circuits::CLIENT_ITEMS_WIDTH], F, transfer_circuit::Spend2Output2PublicInputs)
 {
     let instance = transfer_circuit::Spend2Output2PublicInputs {
+        fee: F::ZERO,
         roots: [root_before; 4],
-        pk_bx,
-        pk_by,
-        new_comms: [new1_commit, new2_commit, F::ZERO, F::ZERO],
-        nfs: [nf1, nf2, F::ZERO, F::ZERO],
-        comp_secs: [F::ZERO; 5],
+        commitments: [new1_commit, new2_commit, F::ZERO, F::ZERO],
+        nullifiers: [nf1, nf2, F::ZERO, F::ZERO],
+        compressed_secrets: [F::ZERO; 5],
+        swap_link: F::ZERO,
+        deadline: F::ZERO,
+        swap_side: F::ZERO,
     };
     let public_items = instance.as_array();
     let state = host_instance_hash(public_items);
@@ -2398,11 +2392,10 @@ fn build_transaction(
     let nf2 = nullifier_for_commit(old2.commit, sender.pk_x, sender.pk_y);
 
     let alpha = JubjubScalar::random(&mut OsRng);
-    let (_pk_blinded_point, pk_bx, pk_by) = blind_pubkey(sender.pk_point, alpha);
     let alpha_f = scalar_to_field(alpha)?;
 
     let (public_items, state, instance) =
-        build_public_items(root_before, pk_bx, pk_by, new1_commit, new2_commit, nf1, nf2);
+        build_public_items(root_before, new1_commit, new2_commit, nf1, nf2);
 
     let witness = (
         historic_commit_map,
