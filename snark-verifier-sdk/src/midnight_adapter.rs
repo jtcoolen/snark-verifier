@@ -318,6 +318,43 @@ impl MidnightProofBundle {
         Ok(())
     }
 
+    /// Generate Solidity verifier source code for this Midnight proof protocol.
+    ///
+    /// The generated contract expects calldata encoded as: instances (32-byte
+    /// big-endian words) followed by proof bytes produced with `MidnightEvmHash`.
+    #[cfg(feature = "loader_evm")]
+    pub fn generate_evm_verifier_solidity(&self) -> Result<String> {
+        let loader = self.build_evm_verifier_loader()?;
+        Ok(loader.solidity_code())
+    }
+
+    /// Generate deployment bytecode for the Midnight Solidity verifier.
+    #[cfg(feature = "loader_evm")]
+    pub fn generate_evm_verifier_bytecode(&self) -> Result<Vec<u8>> {
+        let solidity = self.generate_evm_verifier_solidity()?;
+        Ok(compile_solidity(&solidity))
+    }
+
+    /// Encode calldata expected by the generated Solidity verifier.
+    ///
+    /// The proof bytes must be produced with `MidnightEvmHash`.
+    #[cfg(feature = "loader_evm")]
+    pub fn encode_evm_calldata(&self) -> Result<Vec<u8>> {
+        let instances = self.full_instances_as_halo_fr()?;
+        Ok(encode_calldata(&instances, &self.proof))
+    }
+
+    /// Deploy and call the generated verifier in local revm.
+    ///
+    /// Returns gas used by the verification call.
+    #[cfg(all(feature = "loader_evm", feature = "revm"))]
+    pub fn verify_with_generated_solidity_revm(&self) -> Result<u64> {
+        let bytecode = self.generate_evm_verifier_bytecode()?;
+        let calldata = self.encode_evm_calldata()?;
+        snark_verifier::loader::evm::deploy_and_call(bytecode, calldata)
+            .map_err(|err| anyhow!("revm deployment/call failed: {err}"))
+    }
+
     /// Convert non-committed instances into halo2-axiom `Fr`.
     ///
     /// This is useful for the remaining protocol/proof-level adapter work.
@@ -329,10 +366,7 @@ impl MidnightProofBundle {
     }
 
     fn committed_instance_count(&self) -> usize {
-        self.vk
-            .cs()
-            .num_instance_columns()
-            .saturating_sub(self.instances.len())
+        self.vk.cs().num_instance_columns().saturating_sub(self.instances.len())
     }
 
     fn full_instances_as_halo_fr(&self) -> Result<Vec<Vec<HaloFr>>> {
@@ -343,21 +377,15 @@ impl MidnightProofBundle {
     }
 
     fn committed_instances_as_halo_points(&self) -> Result<Vec<HaloG1Affine>> {
-        self.committed_instances
-            .iter()
-            .cloned()
-            .map(midnight_g1_to_halo_affine)
-            .collect()
+        self.committed_instances.iter().cloned().map(midnight_g1_to_halo_affine).collect()
     }
 
     fn to_snark_protocol(&self) -> Result<PlonkProtocol<HaloG1Affine>> {
         let committed_instance_count = self.committed_instance_count();
-        let num_instance = self
-            .full_instances_as_halo_fr()?
-            .into_iter()
-            .map(|column| column.len())
-            .collect_vec();
-        let builder = MidnightProtocolBuilder::new(&self.vk, num_instance, committed_instance_count);
+        let num_instance =
+            self.full_instances_as_halo_fr()?.into_iter().map(|column| column.len()).collect_vec();
+        let builder =
+            MidnightProtocolBuilder::new(&self.vk, num_instance, committed_instance_count);
         builder.build()
     }
     fn decode_midnight_s_g2(&self) -> Result<G2Projective> {
@@ -369,6 +397,42 @@ impl MidnightProofBundle {
             bail!("unexpected trailing bytes while decoding midnight verifier params");
         }
         Ok(s_g2)
+    }
+
+    #[cfg(feature = "loader_evm")]
+    fn build_evm_verifier_loader(&self) -> Result<Rc<EvmLoader>> {
+        let protocol = self.to_snark_protocol()?;
+        let num_instance = protocol.num_instance.clone();
+        let dk = self.snark_deciding_key()?;
+        let svk = dk.svk();
+
+        let loader = EvmLoader::new::<HaloFq, HaloFr>();
+        let protocol = protocol.loaded(&loader);
+        let mut transcript = EvmTranscript::<HaloG1Affine, Rc<EvmLoader>, _, _>::new(&loader);
+
+        let committed_instances = self
+            .committed_instances_as_halo_points()?
+            .iter()
+            .map(|point| loader.ec_point_load_const(point))
+            .collect_vec();
+        let committed_instances = (!committed_instances.is_empty()).then_some(committed_instances);
+        let instances = transcript.load_instances(num_instance);
+
+        let proof =
+            PlonkProof::<HaloG1Affine, Rc<EvmLoader>, HaloAs>::read_with_committed_instances::<
+                _,
+                LimbsEncoding<{ crate::LIMBS }, { crate::BITS }>,
+            >(
+                &svk, &protocol, &instances, committed_instances.as_deref(), &mut transcript
+            )
+            .map_err(|e| anyhow!("failed to parse Midnight proof with EVM transcript: {e:?}"))?;
+
+        <crate::PlonkVerifier<HaloAs> as SnarkVerifier<HaloG1Affine, Rc<EvmLoader>>>::verify(
+            &dk, &protocol, &instances, &proof,
+        )
+        .map_err(|e| anyhow!("failed to build EVM verifier for Midnight protocol: {e:?}"))?;
+
+        Ok(loader)
     }
 }
 
@@ -610,7 +674,8 @@ impl<'a> MidnightProtocolBuilder<'a> {
     ) -> Self {
         let cs = vk.cs();
 
-        let num_phase = cs.advice_column_phase().iter().max().copied().unwrap_or_default() as usize + 1;
+        let num_phase =
+            cs.advice_column_phase().iter().max().copied().unwrap_or_default() as usize + 1;
         let remap = |phase: Vec<u8>| {
             let num = phase.iter().fold(vec![0; num_phase], |mut acc, phase| {
                 acc[*phase as usize] += 1;
@@ -819,7 +884,9 @@ impl<'a> MidnightProtocolBuilder<'a> {
     ) -> Query {
         match column_type {
             Any::Fixed => Query::new(column_index, Rotation(rotation.0)),
-            Any::Instance => Query::new(self.instance_offset() + column_index, Rotation(rotation.0)),
+            Any::Instance => {
+                Query::new(self.instance_offset() + column_index, Rotation(rotation.0))
+            }
             Any::Advice(advice) => {
                 let phase = advice.phase() as usize;
                 let phase_offset = self.num_advice[..phase].iter().sum::<usize>();
@@ -840,7 +907,10 @@ impl<'a> MidnightProtocolBuilder<'a> {
         }
     }
 
-    fn convert_expression(&self, expression: &MidnightExpression<Fq>) -> Result<Expression<HaloFr>> {
+    fn convert_expression(
+        &self,
+        expression: &MidnightExpression<Fq>,
+    ) -> Result<Expression<HaloFr>> {
         match expression {
             MidnightExpression::Constant(scalar) => {
                 Ok(Expression::Constant(midnight_fq_to_halo_fr(*scalar)?))
@@ -905,7 +975,9 @@ impl<'a> MidnightProtocolBuilder<'a> {
     }
 
     fn permutation_fixed_queries(&self) -> Vec<Query> {
-        (0..self.num_permutation_fixed).map(|i| Query::new(self.num_fixed + i, Rotation(0))).collect()
+        (0..self.num_permutation_fixed)
+            .map(|i| Query::new(self.num_fixed + i, Rotation(0)))
+            .collect()
     }
 
     fn permutation_poly(&self, i: usize) -> usize {
@@ -1027,7 +1099,13 @@ impl<'a> MidnightProtocolBuilder<'a> {
             .permutation()
             .get_columns()
             .iter()
-            .map(|column| self.query(*column.column_type(), column.index(), midnight_proofs::poly::Rotation(0)))
+            .map(|column| {
+                self.query(
+                    *column.column_type(),
+                    column.index(),
+                    midnight_proofs::poly::Rotation(0),
+                )
+            })
             .map(Expression::<HaloFr>::Polynomial)
             .collect_vec();
         let permutation_fixeds = (0..self.num_permutation_fixed)
@@ -1070,27 +1148,28 @@ impl<'a> MidnightProtocolBuilder<'a> {
                         * polys
                             .iter()
                             .zip(permutation_fixeds.iter())
-                            .map(|(poly, permutation_fixed)| poly + &beta * permutation_fixed + &gamma)
+                            .map(|(poly, permutation_fixed)| {
+                                poly + &beta * permutation_fixed + &gamma
+                            })
                             .reduce(|acc, expr| acc * expr)
                             .unwrap();
-                    let right = z
-                        * polys
-                            .iter()
-                            .zip(
-                                std::iter::successors(
-                                    Some(HaloFr::DELTA.pow_vartime(&[
-                                        (i * self.permutation_chunk_size) as u64,
-                                        0,
-                                        0,
-                                        0,
-                                    ])),
-                                    |delta| Some(HaloFr::DELTA * delta),
-                                )
-                                .map(Expression::Constant),
+                    let right = z * polys
+                        .iter()
+                        .zip(
+                            std::iter::successors(
+                                Some(HaloFr::DELTA.pow_vartime(&[
+                                    (i * self.permutation_chunk_size) as u64,
+                                    0,
+                                    0,
+                                    0,
+                                ])),
+                                |delta| Some(HaloFr::DELTA * delta),
                             )
-                            .map(|(poly, delta)| poly + &beta * &delta * &identity + &gamma)
-                            .reduce(|acc, expr| acc * expr)
-                            .unwrap();
+                            .map(Expression::Constant),
+                        )
+                        .map(|(poly, delta)| poly + &beta * &delta * &identity + &gamma)
+                        .reduce(|acc, expr| acc * expr)
+                        .unwrap();
                     &l_active * (left - right)
                 }),
         );
@@ -1172,7 +1251,8 @@ impl<'a> MidnightProtocolBuilder<'a> {
                         .collect::<Result<Vec<_>>>()?,
                     self.trash_challenge(),
                 );
-                let trash_eval = Expression::Polynomial(Query::new(self.trash_poly(i), Rotation(0)));
+                let trash_eval =
+                    Expression::Polynomial(Query::new(self.trash_poly(i), Rotation(0)));
                 Ok(compressed - (Expression::Constant(HaloFr::ONE) - selector) * trash_eval)
             })
             .collect()
