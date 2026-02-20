@@ -1049,6 +1049,27 @@ impl<'a> MidnightProtocolBuilder<'a> {
         Ok(constraints)
     }
 
+    fn trash_constraints(&self) -> Result<Vec<Expression<HaloFr>>> {
+        self.cs
+            .trashcans()
+            .iter()
+            .enumerate()
+            .map(|(i, trash)| {
+                let selector = self.convert_expression(trash.selector())?;
+                let compressed = self.distribute_powers(
+                    trash
+                        .constraint_expressions()
+                        .iter()
+                        .map(|expr| self.convert_expression(expr))
+                        .collect::<Result<Vec<_>>>()?,
+                    self.trash_challenge(),
+                );
+                let trash_eval = Expression::Polynomial(Query::new(self.trash_poly(i), Rotation(0)));
+                Ok(compressed - (Expression::Constant(HaloFr::ONE) - selector) * trash_eval)
+            })
+            .collect()
+    }
+
     fn distribute_powers(
         &self,
         expressions: Vec<Expression<HaloFr>>,
@@ -1069,6 +1090,7 @@ impl<'a> MidnightProtocolBuilder<'a> {
             .into_iter()
             .chain(self.permutation_constraints())
             .chain(self.lookup_constraints()?)
+            .chain(self.trash_constraints()?)
             .collect_vec();
 
         Ok(QuotientPolynomial {
