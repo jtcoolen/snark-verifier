@@ -531,8 +531,15 @@ impl EvmLoader {
         if lhs.value == rhs.value {
             return self.scalar(Value::Constant(U256::ZERO));
         }
+        if matches!(lhs.value, Value::Constant(constant) if constant == U256::ZERO) {
+            return self.neg(rhs);
+        }
         if matches!(rhs.value, Value::Constant(constant) if constant == U256::ZERO) {
             return lhs.clone();
+        }
+        if let Value::Negated(inner) = &rhs.value {
+            let inner = self.scalar((**inner).clone());
+            return self.add(lhs, &inner);
         }
         if rhs.is_const() {
             return self.add(lhs, &self.neg(rhs));
@@ -567,11 +574,27 @@ impl EvmLoader {
         if matches!(rhs.value, Value::Constant(constant) if constant == minus_one) {
             return self.neg(lhs);
         }
+        if let (Value::Negated(lhs_inner), Value::Negated(rhs_inner)) = (&lhs.value, &rhs.value) {
+            let lhs_inner = self.scalar((**lhs_inner).clone());
+            let rhs_inner = self.scalar((**rhs_inner).clone());
+            return self.mul(&lhs_inner, &rhs_inner);
+        }
+        if let Value::Negated(lhs_inner) = &lhs.value {
+            let lhs_inner = self.scalar((**lhs_inner).clone());
+            return self.neg(&self.mul(&lhs_inner, rhs));
+        }
+        if let Value::Negated(rhs_inner) = &rhs.value {
+            let rhs_inner = self.scalar((**rhs_inner).clone());
+            return self.neg(&self.mul(lhs, &rhs_inner));
+        }
 
         self.scalar(Value::Product(Box::new(lhs.value.clone()), Box::new(rhs.value.clone())))
     }
 
     fn neg(self: &Rc<Self>, scalar: &Scalar) -> Scalar {
+        if let Value::Negated(inner) = &scalar.value {
+            return self.scalar((**inner).clone());
+        }
         if let Value::Constant(constant) = scalar.value {
             if constant == U256::ZERO {
                 return self.scalar(Value::Constant(U256::ZERO));
