@@ -82,6 +82,18 @@ where
     pub num_witness: Vec<usize>,
     /// Number of challenges to squeeze from transcript after each phase.
     pub num_challenge: Vec<usize>,
+    /// Number of instance columns represented as commitments instead of scalar vectors.
+    #[serde(default)]
+    pub committed_instance_count: usize,
+    /// Hash each non-committed instance column length into transcript before values.
+    #[serde(default)]
+    pub hash_instance_lengths: bool,
+    /// Number of phase-independent challenges squeezed after all phases (e.g. trash challenge).
+    #[serde(default)]
+    pub trailing_challenges: usize,
+    /// Number of additional commitments read after challenges (e.g. trash commitments).
+    #[serde(default)]
+    pub extra_commitments: usize,
     /// Evaluations to read from transcript.
     pub evaluations: Vec<Query>,
     /// [`crate::pcs::PolynomialCommitmentScheme`] queries to verify.
@@ -161,6 +173,10 @@ where
             num_instance: self.num_instance.clone(),
             num_witness: self.num_witness.clone(),
             num_challenge: self.num_challenge.clone(),
+            committed_instance_count: self.committed_instance_count,
+            hash_instance_lengths: self.hash_instance_lengths,
+            trailing_challenges: self.trailing_challenges,
+            extra_commitments: self.extra_commitments,
             evaluations: self.evaluations.clone(),
             queries: self.queries.clone(),
             quotient: self.quotient.clone(),
@@ -230,6 +246,10 @@ mod halo2 {
                 num_instance: self.num_instance.clone(),
                 num_witness: self.num_witness.clone(),
                 num_challenge: self.num_challenge.clone(),
+                committed_instance_count: self.committed_instance_count,
+                hash_instance_lengths: self.hash_instance_lengths,
+                trailing_challenges: self.trailing_challenges,
+                extra_commitments: self.extra_commitments,
                 evaluations: self.evaluations.clone(),
                 queries: self.queries.clone(),
                 quotient: self.quotient.clone(),
