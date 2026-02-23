@@ -215,8 +215,13 @@ where
     }
 
     let loader = z.loader().clone();
+    let shift_scalars = queries.iter().fold(BTreeMap::new(), |mut acc, query| {
+        acc.entry(query.shift).or_insert_with(|| query.loaded_shift.clone());
+        acc
+    });
     let shift_points =
         queries.iter().map(|query| (query.shift, z.clone() * &query.loaded_shift)).collect_vec();
+    let z_powers = z.powers(point_sets.iter().map(Vec::len).max().unwrap_or_default());
 
     let mut q_coms: Vec<Vec<Msm<C, L>>> = vec![Vec::new(); point_sets.len()];
     let mut q_eval_sets: Vec<Vec<Vec<L::LoadedScalar>>> = vec![Vec::new(); point_sets.len()];
@@ -276,6 +281,7 @@ where
         evals: Vec<S>,
         den: S,
         lagrange_start: usize,
+        z_pow_inv_idx: usize,
         diff_start: usize,
         has_lagrange: bool,
         den_idx: usize,
@@ -307,16 +313,31 @@ where
             )));
         }
 
+        let shifts_scalars = shifts
+            .iter()
+            .map(|shift| {
+                shift_scalars
+                    .get(shift)
+                    .cloned()
+                    .ok_or_else(|| Error::InvalidProtocol(format!("missing loaded shift {}", shift.0)))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
         let lagrange_start = den_pool.len();
-        let has_lagrange = points.len() > 1;
+        let mut z_pow_inv_idx = 0;
+        let has_lagrange = shifts_scalars.len() > 1;
         if has_lagrange {
-            den_pool.extend((0..points.len()).map(|j| {
-                points
+            den_pool.extend((0..shifts_scalars.len()).map(|j| {
+                shifts_scalars
                     .iter()
                     .enumerate()
                     .filter(|(k, _)| *k != j)
-                    .fold(loader.load_one(), |acc, (_, x_k)| acc * &(points[j].clone() - x_k))
+                    .fold(loader.load_one(), |acc, (_, shift_k)| {
+                        acc * &(shifts_scalars[j].clone() - shift_k)
+                    })
             }));
+            z_pow_inv_idx = den_pool.len();
+            den_pool.push(z_powers[shifts_scalars.len() - 1].clone());
         }
 
         let diff_start = den_pool.len();
@@ -332,6 +353,7 @@ where
             evals: evals.clone(),
             den,
             lagrange_start,
+            z_pow_inv_idx,
             diff_start,
             has_lagrange,
             den_idx,
@@ -351,6 +373,7 @@ where
                 let mut basis = term.den.clone() * &den_pool[term.diff_start + j];
                 if term.has_lagrange {
                     basis *= &den_pool[term.lagrange_start + j];
+                    basis *= &den_pool[term.z_pow_inv_idx];
                 }
                 acc + eval.clone() * &basis
             })
