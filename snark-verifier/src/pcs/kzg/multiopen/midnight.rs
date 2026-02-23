@@ -271,7 +271,17 @@ where
     #[cfg(not(feature = "truncated-challenges"))]
     let x3 = proof.x3.clone();
 
-    let mut f_eval_terms = Vec::with_capacity(point_sets.len());
+    struct InterpTerm<S> {
+        proof_eval: S,
+        evals: Vec<S>,
+        den: S,
+        lagrange_start: usize,
+        diff_start: usize,
+        has_lagrange: bool,
+        den_idx: usize,
+    }
+
+    let mut f_eval_terms = Vec::<InterpTerm<L::LoadedScalar>>::with_capacity(point_sets.len());
     let mut den_pool = Vec::<L::LoadedScalar>::new();
     for ((shifts, evals), proof_eval) in
         point_sets.iter().zip(q_eval_sets.iter()).zip(proof.q_evals_on_x3.iter()).rev()
@@ -298,7 +308,8 @@ where
         }
 
         let lagrange_start = den_pool.len();
-        if points.len() > 1 {
+        let has_lagrange = points.len() > 1;
+        if has_lagrange {
             den_pool.extend((0..points.len()).map(|j| {
                 points
                     .iter()
@@ -307,11 +318,24 @@ where
                     .fold(loader.load_one(), |acc, (_, x_k)| acc * &(points[j].clone() - x_k))
             }));
         }
-        let den = points.iter().fold(loader.load_one(), |acc, point| acc * &(x3.clone() - point));
-        let den_idx = den_pool.len();
-        den_pool.push(den);
 
-        f_eval_terms.push((proof_eval.clone(), evals.clone(), points, lagrange_start, den_idx));
+        let diff_start = den_pool.len();
+        let diffs = points.iter().map(|point| x3.clone() - point).collect_vec();
+        den_pool.extend(diffs.iter().cloned());
+        let den = diffs.into_iter().fold(loader.load_one(), |acc, diff| acc * &diff);
+
+        let den_idx = den_pool.len();
+        den_pool.push(den.clone());
+
+        f_eval_terms.push(InterpTerm {
+            proof_eval: proof_eval.clone(),
+            evals: evals.clone(),
+            den,
+            lagrange_start,
+            diff_start,
+            has_lagrange,
+            den_idx,
+        });
     }
 
     if !den_pool.is_empty() {
@@ -319,23 +343,20 @@ where
     }
 
     let mut f_eval = loader.load_zero();
-    for (proof_eval, evals, points, lagrange_start, den_idx) in f_eval_terms {
-        let r_eval = if points.is_empty() {
+    for term in f_eval_terms {
+        let r_eval = if term.evals.is_empty() {
             loader.load_zero()
-        } else if points.len() == 1 {
-            evals[0].clone()
         } else {
-            evals.iter().enumerate().fold(loader.load_zero(), |acc, (j, eval)| {
-                let numer = points
-                    .iter()
-                    .enumerate()
-                    .filter(|(k, _)| *k != j)
-                    .fold(loader.load_one(), |acc, (_, point)| acc * &(x3.clone() - point));
-                acc + eval.clone() * &numer * &den_pool[lagrange_start + j]
+            term.evals.iter().enumerate().fold(loader.load_zero(), |acc, (j, eval)| {
+                let mut basis = term.den.clone() * &den_pool[term.diff_start + j];
+                if term.has_lagrange {
+                    basis *= &den_pool[term.lagrange_start + j];
+                }
+                acc + eval.clone() * &basis
             })
         };
 
-        let eval = (proof_eval - r_eval) * &den_pool[den_idx];
+        let eval = (term.proof_eval - r_eval) * &den_pool[term.den_idx];
         f_eval = f_eval * &proof.x2 + &eval;
     }
 
