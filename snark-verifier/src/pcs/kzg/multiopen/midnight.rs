@@ -368,15 +368,20 @@ where
     for term in f_eval_terms {
         let r_eval = if term.evals.is_empty() {
             loader.load_zero()
+        } else if !term.has_lagrange {
+            // Single-point sets satisfy r(x) = y, so avoid redundant products.
+            term.evals[0].clone()
         } else {
-            term.evals.iter().enumerate().fold(loader.load_zero(), |acc, (j, eval)| {
-                let mut basis = term.den.clone() * &den_pool[term.diff_start + j];
-                if term.has_lagrange {
-                    basis *= &den_pool[term.lagrange_start + j];
-                    basis *= &den_pool[term.z_pow_inv_idx];
-                }
-                acc + eval.clone() * &basis
-            })
+            // r(x3) = den * z^{-(m-1)} * Σ_j [ q_j * (x3-p_j)^{-1} * w_j ],
+            // where w_j are inverse shift-difference weights.
+            let weighted_sum = term.evals.iter().enumerate().fold(loader.load_zero(), |acc, (j, eval)| {
+                let weighted_eval = eval.clone()
+                    * &den_pool[term.diff_start + j]
+                    * &den_pool[term.lagrange_start + j];
+                acc + weighted_eval
+            });
+            let common_scale = term.den.clone() * &den_pool[term.z_pow_inv_idx];
+            weighted_sum * &common_scale
         };
 
         let eval = (term.proof_eval - r_eval) * &den_pool[term.den_idx];
