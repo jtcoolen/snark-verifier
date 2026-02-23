@@ -215,9 +215,13 @@ impl MidnightProofBundle {
     }
 
     fn to_snark_protocol(&self) -> Result<PlonkProtocol<HaloG1Affine>> {
-        let num_instance =
-            self.instances_as_halo_fr()?.into_iter().map(|column| column.len()).collect_vec();
-        let builder = MidnightProtocolBuilder::new(&self.vk, num_instance);
+        let committed_instance_count = self.committed_instance_count();
+        let num_instance = self
+            .full_instances_as_halo_fr()?
+            .into_iter()
+            .map(|column| column.len())
+            .collect_vec();
+        let builder = MidnightProtocolBuilder::new(&self.vk, num_instance, committed_instance_count);
         builder.build()
     }
     fn decode_midnight_s_g2(&self) -> Result<G2Projective> {
@@ -449,6 +453,7 @@ struct MidnightProtocolBuilder<'a> {
     vk: &'a VerifyingKey<Fq, KZGCommitmentScheme<Bls12>>,
     cs: &'a midnight_proofs::plonk::ConstraintSystem<Fq>,
     num_instance: Vec<usize>,
+    committed_instance_count: usize,
     num_advice: Vec<usize>,
     num_challenge: Vec<usize>,
     advice_index: Vec<usize>,
@@ -456,12 +461,17 @@ struct MidnightProtocolBuilder<'a> {
     num_fixed: usize,
     num_permutation_fixed: usize,
     num_lookup_z: usize,
+    num_trash: usize,
     permutation_chunk_size: usize,
     num_permutation_z: usize,
 }
 
 impl<'a> MidnightProtocolBuilder<'a> {
-    fn new(vk: &'a VerifyingKey<Fq, KZGCommitmentScheme<Bls12>>, num_instance: Vec<usize>) -> Self {
+    fn new(
+        vk: &'a VerifyingKey<Fq, KZGCommitmentScheme<Bls12>>,
+        num_instance: Vec<usize>,
+        committed_instance_count: usize,
+    ) -> Self {
         let cs = vk.cs();
 
         let num_phase = cs.advice_column_phase().iter().max().copied().unwrap_or_default() as usize + 1;
@@ -495,6 +505,7 @@ impl<'a> MidnightProtocolBuilder<'a> {
             vk,
             cs,
             num_instance,
+            committed_instance_count,
             num_advice,
             num_challenge,
             advice_index,
@@ -502,6 +513,7 @@ impl<'a> MidnightProtocolBuilder<'a> {
             num_fixed: cs.num_fixed_columns(),
             num_permutation_fixed,
             num_lookup_z: cs.lookups().len(),
+            num_trash: cs.trashcans().len(),
             permutation_chunk_size,
             num_permutation_z,
         }
@@ -512,6 +524,13 @@ impl<'a> MidnightProtocolBuilder<'a> {
             bail!(
                 "instance column mismatch: protocol has {}, provided {}",
                 self.cs.num_instance_columns(),
+                self.num_instance.len()
+            );
+        }
+        if self.committed_instance_count > self.num_instance.len() {
+            bail!(
+                "committed instance count {} exceeds total instance columns {}",
+                self.committed_instance_count,
                 self.num_instance.len()
             );
         }
@@ -527,23 +546,28 @@ impl<'a> MidnightProtocolBuilder<'a> {
             .cloned()
             .map(midnight_g1_to_halo_affine)
             .collect::<Result<Vec<_>>>()?;
+        let committed_instance_queries = self.committed_instance_queries();
         let advice_queries = self.advice_queries()?;
         let fixed_queries = self.fixed_queries();
 
         let evaluations = self
-            .advice_queries()?
+            .committed_instance_queries()
             .into_iter()
+            .chain(advice_queries.clone())
             .chain(fixed_queries.clone())
             .chain(self.random_query())
             .chain(self.permutation_fixed_queries())
             .chain(self.permutation_z_queries(true))
             .chain(self.lookup_queries(true))
+            .chain(self.trash_queries())
             .collect_vec();
 
-        let queries = advice_queries
+        let queries = committed_instance_queries
             .into_iter()
+            .chain(advice_queries)
             .chain(self.permutation_z_queries(false))
             .chain(self.lookup_queries(false))
+            .chain(self.trash_queries())
             .chain(fixed_queries)
             .chain(self.permutation_fixed_queries())
             .chain(Some(self.quotient_query()))
@@ -559,8 +583,8 @@ impl<'a> MidnightProtocolBuilder<'a> {
             num_instance: self.num_instance.clone(),
             num_witness: self.num_witness(),
             num_challenge: self.num_challenge_with_system(),
-            committed_instance_count: 0,
-            hash_instance_lengths: false,
+            committed_instance_count: self.committed_instance_count,
+            hash_instance_lengths: true,
             trailing_challenges: 0,
             extra_commitments: 0,
             evaluations,
@@ -597,22 +621,30 @@ impl<'a> MidnightProtocolBuilder<'a> {
         self.lookup_permuted_offset() + 2 * self.num_lookup_z
     }
 
-    fn random_poly_index(&self) -> usize {
+    fn trash_random_offset(&self) -> usize {
         self.perm_lookup_offset() + self.num_permutation_z + self.num_lookup_z
+    }
+
+    fn random_poly_index(&self) -> usize {
+        self.trash_random_offset() + self.num_trash
     }
 
     fn num_witness(&self) -> Vec<usize> {
         self.num_advice
             .iter()
             .copied()
-            .chain([2 * self.num_lookup_z, self.num_permutation_z + self.num_lookup_z, 1])
+            .chain([
+                2 * self.num_lookup_z,
+                self.num_permutation_z + self.num_lookup_z,
+                self.num_trash + 1,
+            ])
             .collect()
     }
 
     fn num_challenge_with_system(&self) -> Vec<usize> {
         let mut phase_challenges = self.num_challenge.clone();
         *phase_challenges.last_mut().unwrap() += 1; // theta
-        phase_challenges.into_iter().chain([2, 1]).collect()
+        phase_challenges.into_iter().chain([2, 1, 1]).collect()
     }
 
     fn system_challenge_offset(&self) -> usize {
@@ -631,8 +663,12 @@ impl<'a> MidnightProtocolBuilder<'a> {
         Expression::Challenge(self.system_challenge_offset() + 2)
     }
 
-    fn alpha(&self) -> Expression<HaloFr> {
+    fn trash_challenge(&self) -> Expression<HaloFr> {
         Expression::Challenge(self.system_challenge_offset() + 3)
+    }
+
+    fn alpha(&self) -> Expression<HaloFr> {
+        Expression::Challenge(self.system_challenge_offset() + 4)
     }
 
     fn rotation_last(&self) -> Rotation {
@@ -702,6 +738,15 @@ impl<'a> MidnightProtocolBuilder<'a> {
                 Ok(self.convert_expression(a)? * midnight_fq_to_halo_fr(*scalar)?)
             }
         }
+    }
+
+    fn committed_instance_queries(&self) -> Vec<Query> {
+        self.cs
+            .instance_queries()
+            .iter()
+            .filter(|(column, _)| column.index() < self.committed_instance_count)
+            .map(|(column, rotation)| self.query(Any::Instance, column.index(), *rotation))
+            .collect()
     }
 
     fn advice_queries(&self) -> Result<Vec<Query>> {
@@ -790,6 +835,14 @@ impl<'a> MidnightProtocolBuilder<'a> {
                 }
             })
             .collect()
+    }
+
+    fn trash_poly(&self, i: usize) -> usize {
+        self.trash_random_offset() + i
+    }
+
+    fn trash_queries(&self) -> Vec<Query> {
+        (0..self.num_trash).map(|i| Query::new(self.trash_poly(i), Rotation(0))).collect()
     }
 
     fn random_query(&self) -> Option<Query> {
@@ -968,6 +1021,27 @@ impl<'a> MidnightProtocolBuilder<'a> {
         Ok(constraints)
     }
 
+    fn trash_constraints(&self) -> Result<Vec<Expression<HaloFr>>> {
+        self.cs
+            .trashcans()
+            .iter()
+            .enumerate()
+            .map(|(i, trash)| {
+                let selector = self.convert_expression(trash.selector())?;
+                let compressed = self.distribute_powers(
+                    trash
+                        .constraint_expressions()
+                        .iter()
+                        .map(|expr| self.convert_expression(expr))
+                        .collect::<Result<Vec<_>>>()?,
+                    self.trash_challenge(),
+                );
+                let trash_eval = Expression::Polynomial(Query::new(self.trash_poly(i), Rotation(0)));
+                Ok(compressed - (Expression::Constant(HaloFr::ONE) - selector) * trash_eval)
+            })
+            .collect()
+    }
+
     fn distribute_powers(
         &self,
         expressions: Vec<Expression<HaloFr>>,
@@ -988,6 +1062,7 @@ impl<'a> MidnightProtocolBuilder<'a> {
             .into_iter()
             .chain(self.permutation_constraints())
             .chain(self.lookup_constraints()?)
+            .chain(self.trash_constraints()?)
             .collect_vec();
 
         Ok(QuotientPolynomial {
