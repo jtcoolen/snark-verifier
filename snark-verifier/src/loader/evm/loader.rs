@@ -882,10 +882,14 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
     // 4. values[n] <- products[n - 1] * inv (values[n]^{-1})
     // 5. inv <- v_n * inv
     fn batch_invert<'a>(values: impl IntoIterator<Item = &'a mut Scalar>) {
-        let values = values.into_iter().collect_vec();
+        let mut values = values.into_iter().collect_vec();
+        if values.is_empty() {
+            return;
+        }
+
         let loader = &values.first().unwrap().loader;
         let fast_unrolled =
-            std::env::var("MIDNIGHT_EVM_FAST_BATCH_INVERT").map(|v| v == "1").unwrap_or(false);
+            std::env::var("MIDNIGHT_EVM_FAST_BATCH_INVERT").map(|v| v != "0").unwrap_or(true);
         if !fast_unrolled {
             values.into_iter().for_each(|value| {
                 *value = FieldOps::invert(&*value).unwrap_or_else(|| value.clone())
@@ -893,25 +897,41 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
             return;
         }
 
-        let products = iter::once(values[0].clone())
-            .chain(
-                iter::repeat_with(|| loader.allocate(0x20))
-                    .map(|ptr| loader.scalar(Value::Memory(ptr)))
-                    .take(values.len() - 1),
-            )
+        // Snapshot inputs into dedicated memory so repeated pointers do not get clobbered
+        // by reverse writes in the batch inversion schedule.
+        let inputs = values.iter().map(|value| loader.dup_scalar(value)).collect_vec();
+        let products = iter::repeat_with(|| loader.allocate(0x20))
+            .map(|ptr| loader.scalar(Value::Memory(ptr)))
+            .take(inputs.len())
+            .collect_vec();
+        let outputs = iter::repeat_with(|| loader.allocate(0x20))
+            .map(|ptr| loader.scalar(Value::Memory(ptr)))
+            .take(inputs.len())
             .collect_vec();
 
-        let initial_value = loader.push(products.first().unwrap());
-        let mut code = format!("let prod := {initial_value}\n");
-        for (value, product) in values.iter().zip(products.iter()).skip(1) {
-            let v = loader.push(value);
-            let ptr = product.ptr();
+        let first = loader.push(&inputs[0]);
+        let first_ptr = products[0].ptr();
+        let mut code = format!(
+            "
+            let v := {first}
+            let isz := iszero(mod(v, f_q))
+            let masked := add(v, isz)
+            let prod := masked
+            mstore({first_ptr:#x}, prod)
+        "
+        );
+        for idx in 1..inputs.len() {
+            let v = loader.push(&inputs[idx]);
+            let ptr = products[idx].ptr();
             code.push_str(
                 format!(
                     "
-                prod := mulmod({v}, prod, f_q)
-                mstore({ptr:#x}, prod)
-            "
+                    v := {v}
+                    isz := iszero(mod(v, f_q))
+                    masked := add(v, isz)
+                    prod := mulmod(masked, prod, f_q)
+                    mstore({ptr:#x}, prod)
+                "
                 )
                 .as_str(),
             );
@@ -928,35 +948,48 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
             "
             let inv := {inv}
             let v
+            let isz
+            let masked
         "
         );
-        for (value, product) in
-            values.iter().rev().zip(products.iter().rev().skip(1).map(Some).chain(iter::once(None)))
-        {
-            if let Some(product) = product {
-                let val_ptr = value.ptr();
-                let prod_ptr = product.ptr();
-                let v = loader.push(value);
-                code.push_str(
-                    format!(
-                        "
+        for idx in (1..inputs.len()).rev() {
+            let out_ptr = outputs[idx].ptr();
+            let prod_ptr = products[idx - 1].ptr();
+            let v = loader.push(&inputs[idx]);
+            code.push_str(
+                format!(
+                    "
                     v := {v}
-                    mstore({val_ptr}, mulmod(mload({prod_ptr:#x}), inv, f_q))
-                    inv := mulmod(v, inv, f_q)
+                    isz := iszero(mod(v, f_q))
+                    masked := add(v, isz)
+                    mstore({out_ptr:#x}, mulmod(mulmod(mload({prod_ptr:#x}), inv, f_q), sub(1, isz), f_q))
+                    inv := mulmod(masked, inv, f_q)
                 "
-                    )
-                    .as_str(),
-                );
-            } else {
-                let ptr = value.ptr();
-                code.push_str(format!("mstore({ptr:#x}, inv)\n").as_str());
-            }
+                )
+                .as_str(),
+            );
         }
+        let out_ptr = outputs[0].ptr();
+        let v = loader.push(&inputs[0]);
+        code.push_str(
+            format!(
+                "
+                v := {v}
+                isz := iszero(mod(v, f_q))
+                mstore({out_ptr:#x}, mulmod(inv, sub(1, isz), f_q))
+            "
+            )
+            .as_str(),
+        );
         loader.code.borrow_mut().runtime_append(format!(
             "{{
             {code}
         }}"
         ));
+
+        for (value, output) in values.iter_mut().zip(outputs.into_iter()) {
+            **value = output;
+        }
     }
 }
 
