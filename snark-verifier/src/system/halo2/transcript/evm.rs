@@ -8,7 +8,7 @@ use crate::{
         Loader,
     },
     util::{
-        arithmetic::{Coordinates, CurveAffine, PrimeField},
+        arithmetic::{Coordinates, CurveAffine, Field, PrimeField},
         hash::{Digest, Keccak256},
         transcript::{Transcript, TranscriptRead},
         Itertools,
@@ -48,7 +48,7 @@ where
 
     /// Load `num_instance` instances from calldata to memory.
     pub fn load_instances(&mut self, num_instance: Vec<usize>) -> Vec<Vec<Scalar>> {
-        num_instance
+        let instances = num_instance
             .into_iter()
             .map(|len| {
                 iter::repeat_with(|| {
@@ -59,7 +59,17 @@ where
                 .take(len)
                 .collect_vec()
             })
-            .collect()
+            .collect();
+
+        // Keep transcript bytes in a dedicated contiguous region after
+        // preloaded calldata values.
+        if self.buf.end() != self.loader.ptr() {
+            let ptr = self.loader.allocate(0x20);
+            self.buf.reset(ptr);
+            self.buf.extend(0x20);
+        }
+
+        instances
     }
 }
 
@@ -84,20 +94,17 @@ where
         } else {
             self.buf.len()
         };
-        let hash_ptr = self.loader.keccak256(self.buf.ptr(), len);
-
         let challenge_ptr = self.loader.allocate(0x20);
-        let dup_hash_ptr = self.loader.allocate(0x20);
+        let hash_ptr = self.loader.keccak256(self.buf.ptr(), len);
         let code = format!(
             "{{
             let hash := mload({hash_ptr:#x})
             mstore({challenge_ptr:#x}, mod(hash, f_q))
-            mstore({dup_hash_ptr:#x}, hash)
         }}"
         );
         self.loader.code_mut().runtime_append(code);
 
-        self.buf.reset(dup_hash_ptr);
+        self.buf.reset(hash_ptr);
         self.buf.extend(0x20);
 
         self.loader.scalar(Value::Memory(challenge_ptr))
@@ -105,8 +112,17 @@ where
 
     fn common_ec_point(&mut self, ec_point: &EcPoint) -> Result<(), Error> {
         if let Value::Memory(ptr) = ec_point.value() {
-            assert_eq!(self.buf.end(), ptr);
-            self.buf.extend(self.loader.evm_ec_point_bytes());
+            if self.buf.end() == ptr {
+                self.buf.extend(self.loader.evm_ec_point_bytes());
+            } else {
+                let dst = self.loader.dup_ec_point(ec_point);
+                if let Value::Memory(dst_ptr) = dst.value() {
+                    assert_eq!(self.buf.end(), dst_ptr);
+                    self.buf.extend(self.loader.evm_ec_point_bytes());
+                } else {
+                    unreachable!()
+                }
+            }
         } else {
             unreachable!()
         }
@@ -125,8 +141,16 @@ where
                 self.buf.extend(0x20);
             }
             Value::Memory(ptr) => {
-                assert_eq!(self.buf.end(), ptr);
-                self.buf.extend(0x20);
+                if self.buf.end() == ptr {
+                    self.buf.extend(0x20);
+                } else {
+                    let dst = self.loader.allocate(0x20);
+                    assert_eq!(self.buf.end(), dst);
+                    self.loader
+                        .code_mut()
+                        .runtime_append(format!("mstore({dst:#x}, mload({ptr:#x}))"));
+                    self.buf.extend(0x20);
+                }
             }
             _ => unreachable!(),
         }
@@ -187,22 +211,28 @@ where
     }
 
     fn common_ec_point(&mut self, ec_point: &C) -> Result<(), Error> {
-        let coordinates =
-            Option::<Coordinates<C>>::from(ec_point.coordinates()).ok_or_else(|| {
-                Error::Transcript(io::ErrorKind::Other, "Invalid elliptic curve point".to_string())
-            })?;
-
-        [coordinates.x(), coordinates.y()].map(|coordinate| {
-            let repr = coordinate.to_repr();
-            let repr = repr.as_ref();
-            let encoded_len = match repr.len() {
+        if let Some(coordinates) = Option::<Coordinates<C>>::from(ec_point.coordinates()) {
+            [coordinates.x(), coordinates.y()].map(|coordinate| {
+                let repr = coordinate.to_repr();
+                let repr = repr.as_ref();
+                let encoded_len = match repr.len() {
+                    0..=0x20 => 0x20,
+                    0x21..=0x40 => 0x40,
+                    _ => unreachable!("unsupported base-field encoding length: {}", repr.len()),
+                };
+                self.buf.extend(iter::repeat(0).take(encoded_len - repr.len()));
+                self.buf.extend(repr.iter().rev().copied());
+            });
+        } else {
+            // EVM precompiles represent point-at-infinity as (0, 0).
+            let repr_len = <C::Base as PrimeField>::Repr::default().as_ref().len();
+            let encoded_len = match repr_len {
                 0..=0x20 => 0x20,
                 0x21..=0x40 => 0x40,
-                _ => unreachable!("unsupported base-field encoding length: {}", repr.len()),
+                _ => unreachable!("unsupported base-field encoding length: {}", repr_len),
             };
-            self.buf.extend(iter::repeat(0).take(encoded_len - repr.len()));
-            self.buf.extend(repr.iter().rev().copied());
-        });
+            self.buf.extend(iter::repeat(0).take(2 * encoded_len));
+        }
 
         Ok(())
     }
@@ -241,15 +271,29 @@ where
                 .map_err(|err| Error::Transcript(err.kind(), err.to_string()))?;
             repr.as_mut().reverse();
         }
-        let x = Option::from(<C::Base as PrimeField>::from_repr(x));
-        let y = Option::from(<C::Base as PrimeField>::from_repr(y));
-        let ec_point =
-            x.zip(y).and_then(|(x, y)| Option::from(C::from_xy(x, y))).ok_or_else(|| {
+        let x = Option::from(<C::Base as PrimeField>::from_repr(x)).ok_or_else(|| {
+            Error::Transcript(
+                io::ErrorKind::Other,
+                "Invalid x-coordinate encoding in proof".to_string(),
+            )
+        })?;
+        let y = Option::from(<C::Base as PrimeField>::from_repr(y)).ok_or_else(|| {
+            Error::Transcript(
+                io::ErrorKind::Other,
+                "Invalid y-coordinate encoding in proof".to_string(),
+            )
+        })?;
+        // EVM precompiles represent point-at-infinity as (0, 0).
+        let ec_point = if x == C::Base::ZERO && y == C::Base::ZERO {
+            C::identity()
+        } else {
+            Option::from(C::from_xy(x, y)).ok_or_else(|| {
                 Error::Transcript(
                     io::ErrorKind::Other,
                     "Invalid elliptic curve point encoding in proof".to_string(),
                 )
-            })?;
+            })?
+        };
         self.common_ec_point(&ec_point)?;
         Ok(ec_point)
     }

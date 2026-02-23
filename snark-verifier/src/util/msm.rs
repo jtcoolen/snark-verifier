@@ -1,7 +1,7 @@
 //! Multi-scalar multiplication algorithm.
 
 use crate::{
-    loader::{LoadedEcPoint, Loader},
+    loader::{LoadedEcPoint, LoadedScalar, Loader},
     util::{
         arithmetic::{CurveAffine, Group, PrimeField},
         Itertools,
@@ -73,7 +73,28 @@ where
             .chain(self.constant.as_ref().map(|constant| (constant, gen.as_ref().unwrap())))
             .chain(self.scalars.iter().zip(self.bases))
             .collect_vec();
-        L::multi_scalar_multiplication(&pairs)
+        let Some((first_scalar, _)) = pairs.first().copied() else {
+            return L::multi_scalar_multiplication(&pairs);
+        };
+
+        let loader = first_scalar.loader();
+        let zero = loader.load_zero();
+        let one = loader.load_one();
+        let filtered = pairs
+            .iter()
+            .copied()
+            .filter(|(scalar, _)| *scalar != &zero)
+            .collect_vec();
+
+        if filtered.len() == 1 && filtered[0].0 == &one {
+            return filtered[0].1.clone();
+        }
+
+        if filtered.is_empty() {
+            L::multi_scalar_multiplication(&pairs)
+        } else {
+            L::multi_scalar_multiplication(&filtered)
+        }
     }
 
     fn scale(&mut self, factor: &L::LoadedScalar) {
