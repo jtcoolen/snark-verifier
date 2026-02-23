@@ -401,6 +401,38 @@ impl EvmLoader {
         self.ec_point(Value::Memory(rd_ptr))
     }
 
+    fn ec_point_multi_scalar_mul(self: &Rc<Self>, pairs: &[(&Scalar, &EcPoint)]) -> EcPoint {
+        assert!(!pairs.is_empty(), "pairs should not be empty");
+
+        if pairs.len() == 1 {
+            let (scalar, ec_point) = pairs[0];
+            return match scalar.value {
+                Value::Constant(constant) if U256::from(1) == constant => ec_point.clone(),
+                _ => self.ec_point_scalar_mul(ec_point, scalar),
+            };
+        }
+
+        let pair_bytes = BLS_G1_BYTES + 0x20;
+        let cd_len = pairs
+            .len()
+            .checked_mul(pair_bytes)
+            .expect("MSM calldata length overflow");
+        let cd_ptr = self.ptr();
+        for (scalar, ec_point) in pairs.iter().copied() {
+            self.dup_ec_point(ec_point);
+            self.dup_scalar(scalar);
+        }
+        let rd_ptr = self.allocate(BLS_G1_BYTES);
+        self.staticcall_with_lengths(
+            Precompiled::Bls12_381G1Msm,
+            cd_ptr,
+            cd_len,
+            rd_ptr,
+            BLS_G1_BYTES,
+        );
+        self.ec_point(Value::Memory(rd_ptr))
+    }
+
     /// Performs pairing.
     pub fn pairing(
         self: &Rc<Self>,
@@ -751,14 +783,11 @@ where
         pairs: &[(&<Self as ScalarLoader<C::Scalar>>::LoadedScalar, &EcPoint)],
     ) -> EcPoint {
         pairs
-            .iter()
-            .cloned()
-            .map(|(scalar, ec_point)| match scalar.value {
-                Value::Constant(constant) if U256::from(1) == constant => ec_point.clone(),
-                _ => ec_point.loader.ec_point_scalar_mul(ec_point, scalar),
-            })
-            .reduce(|acc, ec_point| acc.loader.ec_point_add(&acc, &ec_point))
+            .first()
             .expect("pairs should not be empty")
+            .1
+            .loader
+            .ec_point_multi_scalar_mul(pairs)
     }
 }
 
