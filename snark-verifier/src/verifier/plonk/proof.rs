@@ -9,7 +9,7 @@ use crate::{
     },
     verifier::plonk::protocol::{
         CommonPolynomial::Lagrange, CommonPolynomialEvaluation, LinearizationStrategy,
-        PlonkProtocol, Query,
+        PlonkProtocol, Query, QuotientChunkBase,
     },
     Error,
 };
@@ -350,9 +350,19 @@ where
                 + self.extra_commitments.len(),
             Rotation::cur(),
         );
-        let quotient = common_poly_eval
-            .zn()
-            .pow_const(protocol.quotient.chunk_degree as u64)
+        let quotient_base = match protocol.quotient.chunk_base {
+            QuotientChunkBase::Zn => common_poly_eval.zn().pow_const(protocol.quotient.chunk_degree as u64),
+            QuotientChunkBase::ZnMinusOne => {
+                let z_inv = common_poly_eval
+                    .get(crate::verifier::plonk::CommonPolynomial::Identity)
+                    .invert()
+                    .ok_or_else(|| {
+                        Error::InvalidProtocol("Missing inverse for quotient split base".to_string())
+                    })?;
+                (common_poly_eval.zn().clone() * &z_inv).pow_const(protocol.quotient.chunk_degree as u64)
+            }
+        };
+        let quotient = quotient_base
             .powers(self.quotients.len())
             .into_iter()
             .zip(self.quotients.iter().map(Msm::base))

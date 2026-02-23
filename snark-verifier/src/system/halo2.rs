@@ -667,7 +667,12 @@ impl<'a, F: PrimeField> Polynomials<'a, F> {
             })
             .collect_vec();
         let numerator = Expression::DistributePowers(constraints, self.alpha().into());
-        QuotientPolynomial { chunk_degree: 1, numerator }
+        QuotientPolynomial {
+            chunk_degree: 1,
+            chunk_base: crate::verifier::plonk::protocol::QuotientChunkBase::Zn,
+            num_chunk_override: None,
+            numerator,
+        }
     }
 
     fn accumulator_indices(

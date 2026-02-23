@@ -262,6 +262,7 @@ mod halo2 {
     }
 }
 
+#[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum CommonPolynomial {
     Identity,
@@ -369,14 +370,31 @@ where
     }
 }
 
+#[allow(missing_docs)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct QuotientPolynomial<F: Clone> {
     pub chunk_degree: usize,
+    #[serde(default)]
+    pub chunk_base: QuotientChunkBase,
+    #[serde(default)]
+    pub num_chunk_override: Option<usize>,
     pub numerator: Expression<F>,
 }
 
+#[allow(missing_docs)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub enum QuotientChunkBase {
+    #[default]
+    Zn,
+    ZnMinusOne,
+}
+
+#[allow(missing_docs)]
 impl<F: Clone> QuotientPolynomial<F> {
     pub fn num_chunk(&self) -> usize {
+        if let Some(num_chunk) = self.num_chunk_override {
+            return num_chunk;
+        }
         Integer::div_ceil(
             &(self.numerator.degree().checked_sub(1).unwrap_or_default()),
             &self.chunk_degree,
@@ -384,18 +402,21 @@ impl<F: Clone> QuotientPolynomial<F> {
     }
 }
 
+#[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Query {
     pub poly: usize,
     pub rotation: Rotation,
 }
 
+#[allow(missing_docs)]
 impl Query {
     pub fn new<R: Into<Rotation>>(poly: usize, rotation: R) -> Self {
         Self { poly, rotation: rotation.into() }
     }
 }
 
+#[allow(missing_docs)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Expression<F> {
     Constant(F),
@@ -409,6 +430,7 @@ pub enum Expression<F> {
     DistributePowers(Vec<Expression<F>>, Box<Expression<F>>),
 }
 
+#[allow(missing_docs)]
 impl<F: Clone> Expression<F> {
     pub fn evaluate<T: Clone>(
         &self,
