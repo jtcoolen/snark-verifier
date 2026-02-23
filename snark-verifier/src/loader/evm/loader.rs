@@ -404,6 +404,30 @@ impl EvmLoader {
     fn ec_point_multi_scalar_mul(self: &Rc<Self>, pairs: &[(&Scalar, &EcPoint)]) -> EcPoint {
         assert!(!pairs.is_empty(), "pairs should not be empty");
 
+        let pairs = pairs
+            .iter()
+            .copied()
+            .filter(|(scalar, _)| !matches!(scalar.value, Value::Constant(c) if c == U256::ZERO))
+            .collect_vec();
+
+        if pairs.is_empty() {
+            let ptr = self.allocate(BLS_G1_BYTES);
+            self.code.borrow_mut().runtime_append(format!(
+                "
+            {{
+                mstore({:#x}, 0)
+                mstore({:#x}, 0)
+                mstore({:#x}, 0)
+                mstore({:#x}, 0)
+            }}",
+                ptr,
+                ptr + 0x20,
+                ptr + BLS_ENCODED_FP_BYTES,
+                ptr + BLS_ENCODED_FP_BYTES + 0x20
+            ));
+            return self.ec_point(Value::Memory(ptr));
+        }
+
         if pairs.len() == 1 {
             let (scalar, ec_point) = pairs[0];
             return match scalar.value {
