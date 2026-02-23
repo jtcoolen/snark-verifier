@@ -339,21 +339,21 @@ where
         f_eval = f_eval * &proof.x2 + &eval;
     }
 
-    let final_com = {
-        let mut coms = q_coms;
-        coms.push(Msm::base(&proof.f_com));
-    let powers_x4 = loader.powers_with_challenge_policy(&proof.x4, coms.len());
-        coms.into_iter().zip(powers_x4.iter()).map(|(msm, scalar)| msm * scalar).sum::<Msm<_, _>>()
-    };
-    let v = {
-        let mut evals = proof.q_evals_on_x3.clone();
-        evals.push(f_eval);
-        let powers_x4 = loader.powers_with_challenge_policy(&proof.x4, evals.len());
-        evals
-            .into_iter()
-            .zip(powers_x4.into_iter())
-            .fold(loader.load_zero(), |acc, (eval, pow)| acc + eval * &pow)
-    };
+    let powers_x4 =
+        loader.powers_with_challenge_policy(&proof.x4, proof.q_evals_on_x3.len() + 1);
+    let final_com = q_coms
+        .into_iter()
+        .chain(std::iter::once(Msm::base(&proof.f_com)))
+        .zip(powers_x4.iter())
+        .map(|(msm, scalar)| msm * scalar)
+        .sum::<Msm<_, _>>();
+    let v = proof
+        .q_evals_on_x3
+        .iter()
+        .cloned()
+        .chain(std::iter::once(f_eval))
+        .zip(powers_x4.into_iter())
+        .fold(loader.load_zero(), |acc, (eval, pow)| acc + eval * &pow);
 
     // Midnight verifies: e(pi, s_g2) * e(final_com + x3*pi - v*g, -g2) == 1.
     // snark-verifier accumulator convention is:
