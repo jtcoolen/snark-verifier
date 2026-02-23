@@ -10,7 +10,7 @@ use num_traits::One;
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::{max, Ordering},
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fmt::Debug,
     iter::{self, Sum},
     ops::{Add, Mul, Neg, Sub},
@@ -480,6 +480,203 @@ impl<F: Clone> Expression<F> {
                 exprs.fold(first, |acc, expr| sum(product(acc, scalar.clone()), evaluate(expr)))
             }
         }
+    }
+
+    pub fn evaluate_cse<T: Clone>(
+        &self,
+        constant: &impl Fn(F) -> T,
+        common_poly: &impl Fn(CommonPolynomial) -> T,
+        poly: &impl Fn(Query) -> T,
+        challenge: &impl Fn(usize) -> T,
+        negated: &impl Fn(T) -> T,
+        sum: &impl Fn(T, T) -> T,
+        product: &impl Fn(T, T) -> T,
+        scaled: &impl Fn(T, F) -> T,
+    ) -> T
+    where
+        F: Debug,
+    {
+        fn evaluate_inner<F: Clone + Debug, T: Clone>(
+            expr: &Expression<F>,
+            cache: &mut HashMap<String, T>,
+            constant: &impl Fn(F) -> T,
+            common_poly: &impl Fn(CommonPolynomial) -> T,
+            poly: &impl Fn(Query) -> T,
+            challenge: &impl Fn(usize) -> T,
+            negated: &impl Fn(T) -> T,
+            sum: &impl Fn(T, T) -> T,
+            product: &impl Fn(T, T) -> T,
+            scaled: &impl Fn(T, F) -> T,
+        ) -> T {
+            let key = format!("{expr:?}");
+            if let Some(value) = cache.get(&key) {
+                return value.clone();
+            }
+
+            let value = match expr {
+                Expression::Constant(scalar) => constant(scalar.clone()),
+                Expression::CommonPolynomial(poly) => common_poly(*poly),
+                Expression::Polynomial(query) => poly(*query),
+                Expression::Challenge(index) => challenge(*index),
+                Expression::Negated(a) => {
+                    let a = evaluate_inner(
+                        a,
+                        cache,
+                        constant,
+                        common_poly,
+                        poly,
+                        challenge,
+                        negated,
+                        sum,
+                        product,
+                        scaled,
+                    );
+                    negated(a)
+                }
+                Expression::Sum(a, b) => {
+                    let a = evaluate_inner(
+                        a,
+                        cache,
+                        constant,
+                        common_poly,
+                        poly,
+                        challenge,
+                        negated,
+                        sum,
+                        product,
+                        scaled,
+                    );
+                    let b = evaluate_inner(
+                        b,
+                        cache,
+                        constant,
+                        common_poly,
+                        poly,
+                        challenge,
+                        negated,
+                        sum,
+                        product,
+                        scaled,
+                    );
+                    sum(a, b)
+                }
+                Expression::Product(a, b) => {
+                    let a = evaluate_inner(
+                        a,
+                        cache,
+                        constant,
+                        common_poly,
+                        poly,
+                        challenge,
+                        negated,
+                        sum,
+                        product,
+                        scaled,
+                    );
+                    let b = evaluate_inner(
+                        b,
+                        cache,
+                        constant,
+                        common_poly,
+                        poly,
+                        challenge,
+                        negated,
+                        sum,
+                        product,
+                        scaled,
+                    );
+                    product(a, b)
+                }
+                Expression::Scaled(a, scalar) => {
+                    let a = evaluate_inner(
+                        a,
+                        cache,
+                        constant,
+                        common_poly,
+                        poly,
+                        challenge,
+                        negated,
+                        sum,
+                        product,
+                        scaled,
+                    );
+                    scaled(a, scalar.clone())
+                }
+                Expression::DistributePowers(exprs, scalar) => {
+                    assert!(!exprs.is_empty());
+                    if exprs.len() == 1 {
+                        return evaluate_inner(
+                            exprs.first().unwrap(),
+                            cache,
+                            constant,
+                            common_poly,
+                            poly,
+                            challenge,
+                            negated,
+                            sum,
+                            product,
+                            scaled,
+                        );
+                    }
+                    let mut exprs = exprs.iter();
+                    let first = evaluate_inner(
+                        exprs.next().unwrap(),
+                        cache,
+                        constant,
+                        common_poly,
+                        poly,
+                        challenge,
+                        negated,
+                        sum,
+                        product,
+                        scaled,
+                    );
+                    let scalar = evaluate_inner(
+                        scalar,
+                        cache,
+                        constant,
+                        common_poly,
+                        poly,
+                        challenge,
+                        negated,
+                        sum,
+                        product,
+                        scaled,
+                    );
+                    exprs.fold(first, |acc, expr| {
+                        let term = evaluate_inner(
+                            expr,
+                            cache,
+                            constant,
+                            common_poly,
+                            poly,
+                            challenge,
+                            negated,
+                            sum,
+                            product,
+                            scaled,
+                        );
+                        sum(product(acc, scalar.clone()), term)
+                    })
+                }
+            };
+
+            cache.insert(key, value.clone());
+            value
+        }
+
+        evaluate_inner(
+            self,
+            &mut HashMap::new(),
+            constant,
+            common_poly,
+            poly,
+            challenge,
+            negated,
+            sum,
+            product,
+            scaled,
+        )
     }
 
     pub fn degree(&self) -> usize {

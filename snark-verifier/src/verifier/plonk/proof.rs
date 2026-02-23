@@ -309,7 +309,7 @@ where
             .chain(self.extra_commitments.iter().map(Msm::base))
             .collect_vec();
 
-        let numerator = protocol.quotient.numerator.evaluate(
+        let numerator = protocol.quotient.numerator.evaluate_cse(
             &|scalar| Ok(Msm::constant(loader.load_const(&scalar))),
             &|poly| Ok(Msm::constant(common_poly_eval.get(poly).clone())),
             &|query| {
