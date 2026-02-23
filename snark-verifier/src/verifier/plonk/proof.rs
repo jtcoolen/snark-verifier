@@ -356,16 +356,29 @@ where
                 common_poly_eval.zn().pow_const(protocol.quotient.chunk_degree as u64)
             }
             QuotientChunkBase::ZnMinusOne => {
-                let z_inv = common_poly_eval
-                    .get(crate::verifier::plonk::CommonPolynomial::Identity)
-                    .invert()
-                    .ok_or_else(|| {
-                        Error::InvalidProtocol(
-                            "Missing inverse for quotient split base".to_string(),
-                        )
+                let zn_minus_one = protocol
+                    .domain_as_witness
+                    .as_ref()
+                    .map(|_| {
+                        let z_inv = common_poly_eval
+                            .get(crate::verifier::plonk::CommonPolynomial::Identity)
+                            .invert()
+                            .ok_or_else(|| {
+                                Error::InvalidProtocol(
+                                    "Missing inverse for quotient split base".to_string(),
+                                )
+                            })?;
+                        Ok(common_poly_eval.zn().clone() * &z_inv)
+                    })
+                    .unwrap_or_else(|| {
+                        let n_minus_one = protocol.domain.n.checked_sub(1).ok_or_else(|| {
+                            Error::InvalidProtocol("Quotient split domain is too small".to_string())
+                        })?;
+                        Ok(common_poly_eval
+                            .get(crate::verifier::plonk::CommonPolynomial::Identity)
+                            .pow_const(n_minus_one as u64))
                     })?;
-                (common_poly_eval.zn().clone() * &z_inv)
-                    .pow_const(protocol.quotient.chunk_degree as u64)
+                zn_minus_one.pow_const(protocol.quotient.chunk_degree as u64)
             }
         };
         let quotient = quotient_base
