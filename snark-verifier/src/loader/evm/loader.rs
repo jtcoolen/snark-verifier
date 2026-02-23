@@ -14,7 +14,7 @@ use crate::{
 use hex;
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::{self, Debug},
     iter,
     ops::{Add, AddAssign, DerefMut, Mul, MulAssign, Neg, Sub, SubAssign},
@@ -986,7 +986,7 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
             return;
         }
 
-        let loader = &values.first().unwrap().loader;
+        let loader = values.first().unwrap().loader.clone();
         let fast_unrolled =
             std::env::var("MIDNIGHT_EVM_FAST_BATCH_INVERT").map(|v| v != "0").unwrap_or(true);
         if !fast_unrolled {
@@ -996,14 +996,30 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
             return;
         }
 
-        // Snapshot inputs into dedicated memory so repeated pointers do not get clobbered
-        // by reverse writes in the batch inversion schedule.
-        let inputs = values.iter().map(|value| loader.dup_scalar(value)).collect_vec();
+        let mut seen_ptrs = HashSet::with_capacity(values.len());
+        let in_place_ptrs = values
+            .iter()
+            .map(|value| match value.value {
+                Value::Memory(ptr) if seen_ptrs.insert(ptr) => Some(ptr),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>();
+        let (inputs, output_ptrs, needs_write_back) = if let Some(ptrs) = in_place_ptrs {
+            (
+                ptrs.iter().map(|ptr| loader.scalar(Value::Memory(*ptr))).collect_vec(),
+                ptrs,
+                false,
+            )
+        } else {
+            // Snapshot inputs into dedicated memory so repeated pointers do not get clobbered
+            // by reverse writes in the batch inversion schedule.
+            (
+                values.iter().map(|value| loader.dup_scalar(value)).collect_vec(),
+                iter::repeat_with(|| loader.allocate(0x20)).take(values.len()).collect_vec(),
+                true,
+            )
+        };
         let products = iter::repeat_with(|| loader.allocate(0x20))
-            .map(|ptr| loader.scalar(Value::Memory(ptr)))
-            .take(inputs.len())
-            .collect_vec();
-        let outputs = iter::repeat_with(|| loader.allocate(0x20))
             .map(|ptr| loader.scalar(Value::Memory(ptr)))
             .take(inputs.len())
             .collect_vec();
@@ -1052,7 +1068,7 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
         "
         );
         for idx in (1..inputs.len()).rev() {
-            let out_ptr = outputs[idx].ptr();
+            let out_ptr = output_ptrs[idx];
             let prod_ptr = products[idx - 1].ptr();
             let v = loader.push(&inputs[idx]);
             code.push_str(
@@ -1065,10 +1081,10 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
                     inv := mulmod(masked, inv, f_q)
                 "
                 )
-                .as_str(),
+                    .as_str(),
             );
         }
-        let out_ptr = outputs[0].ptr();
+        let out_ptr = output_ptrs[0];
         let v = loader.push(&inputs[0]);
         code.push_str(
             format!(
@@ -1086,8 +1102,10 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
         }}"
         ));
 
-        for (value, output) in values.iter_mut().zip(outputs.into_iter()) {
-            **value = output;
+        if needs_write_back {
+            for (value, ptr) in values.iter_mut().zip(output_ptrs.into_iter()) {
+                **value = loader.scalar(Value::Memory(ptr));
+            }
         }
     }
 }
