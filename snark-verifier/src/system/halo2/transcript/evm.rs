@@ -94,20 +94,17 @@ where
         } else {
             self.buf.len()
         };
-        let hash_ptr = self.loader.keccak256(self.buf.ptr(), len);
-
         let challenge_ptr = self.loader.allocate(0x20);
-        let dup_hash_ptr = self.loader.allocate(0x20);
+        let hash_ptr = self.loader.keccak256(self.buf.ptr(), len);
         let code = format!(
             "{{
             let hash := mload({hash_ptr:#x})
             mstore({challenge_ptr:#x}, mod(hash, f_q))
-            mstore({dup_hash_ptr:#x}, hash)
         }}"
         );
         self.loader.code_mut().runtime_append(code);
 
-        self.buf.reset(dup_hash_ptr);
+        self.buf.reset(hash_ptr);
         self.buf.extend(0x20);
 
         self.loader.scalar(Value::Memory(challenge_ptr))
