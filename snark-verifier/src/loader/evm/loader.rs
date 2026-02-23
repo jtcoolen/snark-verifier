@@ -488,11 +488,20 @@ impl EvmLoader {
             let out = (U512::from(*lhs) + U512::from(*rhs)) % U512::from(self.scalar_modulus);
             return self.scalar(Value::Constant(U256::from(out)));
         }
+        if matches!(lhs.value, Value::Constant(constant) if constant == U256::ZERO) {
+            return rhs.clone();
+        }
+        if matches!(rhs.value, Value::Constant(constant) if constant == U256::ZERO) {
+            return lhs.clone();
+        }
 
         self.scalar(Value::Sum(Box::new(lhs.value.clone()), Box::new(rhs.value.clone())))
     }
 
     fn sub(self: &Rc<Self>, lhs: &Scalar, rhs: &Scalar) -> Scalar {
+        if matches!(rhs.value, Value::Constant(constant) if constant == U256::ZERO) {
+            return lhs.clone();
+        }
         if rhs.is_const() {
             return self.add(lhs, &self.neg(rhs));
         }
@@ -507,6 +516,17 @@ impl EvmLoader {
         if let (Value::Constant(lhs), Value::Constant(rhs)) = (&lhs.value, &rhs.value) {
             let out = (U512::from(*lhs) * U512::from(*rhs)) % U512::from(self.scalar_modulus);
             return self.scalar(Value::Constant(U256::from(out)));
+        }
+        if matches!(lhs.value, Value::Constant(constant) if constant == U256::ZERO)
+            || matches!(rhs.value, Value::Constant(constant) if constant == U256::ZERO)
+        {
+            return self.scalar(Value::Constant(U256::ZERO));
+        }
+        if matches!(lhs.value, Value::Constant(constant) if constant == U256::from(1)) {
+            return rhs.clone();
+        }
+        if matches!(rhs.value, Value::Constant(constant) if constant == U256::from(1)) {
+            return lhs.clone();
         }
 
         self.scalar(Value::Product(Box::new(lhs.value.clone()), Box::new(rhs.value.clone())))
