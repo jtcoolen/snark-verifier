@@ -346,6 +346,19 @@ impl EvmLoader {
         self.ec_point(Value::Memory(ptr))
     }
 
+    fn staticcall_with_lengths(
+        self: &Rc<Self>,
+        precompile: Precompiled,
+        cd_ptr: usize,
+        cd_len: usize,
+        rd_ptr: usize,
+        rd_len: usize,
+    ) {
+        let a = precompile as usize;
+        let code = format!("success := and(eq(staticcall(gas(), {a:#x}, {cd_ptr:#x}, {cd_len:#x}, {rd_ptr:#x}, {rd_len:#x}), 1), success)");
+        self.code.borrow_mut().runtime_append(code);
+    }
+
     fn staticcall(self: &Rc<Self>, precompile: Precompiled, cd_ptr: usize, rd_ptr: usize) {
         let (cd_len, rd_len) = match precompile {
             Precompiled::BigModExp => (0xc0, 0x20),
@@ -356,9 +369,7 @@ impl EvmLoader {
             //   [G1 (128) || G2 (256)] * 2 = 768 bytes
             Precompiled::Bls12_381Pairing => (2 * (BLS_G1_BYTES + BLS_G2_BYTES), 0x20),
         };
-        let a = precompile as usize;
-        let code = format!("success := and(eq(staticcall(gas(), {a:#x}, {cd_ptr:#x}, {cd_len:#x}, {rd_ptr:#x}, {rd_len:#x}), 1), success)");
-        self.code.borrow_mut().runtime_append(code);
+        self.staticcall_with_lengths(precompile, cd_ptr, cd_len, rd_ptr, rd_len);
     }
 
     fn invert(self: &Rc<Self>, scalar: &Scalar) -> Scalar {
