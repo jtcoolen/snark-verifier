@@ -135,10 +135,7 @@ mod evm {
         padded[offset..].copy_from_slice(&be);
         let hi: [u8; 0x20] = padded[..0x20].try_into().unwrap();
         let lo: [u8; 0x20] = padded[0x20..].try_into().unwrap();
-        [
-            U256::from_be_bytes(hi),
-            U256::from_be_bytes(lo),
-        ]
+        [U256::from_be_bytes(hi), U256::from_be_bytes(lo)]
     }
 
     fn g2_to_words<C: CurveAffine>(ec_point: C) -> Vec<U256> {
@@ -155,10 +152,7 @@ mod evm {
         // EIP-2537 expects Fp2 coordinates in (c0, c1) order.
         // `to_repr()` for Fp2 in halo2curves is `c0 || c1` (little-endian bytes per component).
         let components = [&x[..x_mid], &x[x_mid..], &y[..y_mid], &y[y_mid..]];
-        components
-            .into_iter()
-            .flat_map(le_component_to_padded_words)
-            .collect()
+        components.into_iter().flat_map(le_component_to_padded_words).collect()
     }
 
     impl<M, MOS> AccumulationDecider<M::G1Affine, Rc<EvmLoader>> for KzgAs<M, MOS>

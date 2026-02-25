@@ -13,7 +13,6 @@ autobenches = false
 [dependencies]
 itertools = "0.11"
 lazy_static = "1.4.0"
-num-bigint = "0.4.3"
 num-integer = "0.1.45"
 num-traits = "0.2.15"
 rand = "0.8"
@@ -28,6 +27,14 @@ ark-std = { version = "0.3.0", features = ["print-trace"], optional = true }
 halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", tag = "v0.5.0-git", default-features = false }
 snark-verifier = { version = "=0.2.3", path = "../snark-verifier", default-features = false }
 getset = "0.1.2"
+anyhow = { version = "1", optional = true }
+
+# Optional bridge into Midnight (halo2 fork) artifacts
+midnight-proofs = { version = "0.7.0", optional = true, default-features = false }
+midnight-curves = { version = "0.2.0", optional = true }
+midnight-circuits = { version = "6.0.0", optional = true, features = ["testing"] }
+midnight-zk-stdlib = { version = "1.0.0", optional = true }
+ff = { version = "0.13", optional = true }
 
 # loader_evm
 ethereum-types = { version = "=0.14.1", default-features = false, features = [
@@ -40,6 +47,8 @@ paste = "1.0.7"
 pprof = { version = "0.13", features = ["criterion", "flamegraph"] }
 criterion = "0.5.1"
 criterion-macro = "0.4"
+num-bigint = "0.4.3"
+sha3 = "=0.10"
 # loader_evm
 crossterm = { version = "0.25" }
 ratatui = { version = "0.24", default-features = false, features = [
@@ -59,9 +68,19 @@ loader_halo2 = ["snark-verifier/loader_halo2"]
 loader_evm = ["snark-verifier/loader_evm", "dep:ethereum-types"]
 revm = ["snark-verifier/revm"]
 parallel = ["snark-verifier/parallel"]
+# Forward the verifier-side feature so SDK examples can opt into identical transcript behavior.
+truncated-challenges = ["snark-verifier/truncated-challenges"]
 # EXACTLY one of halo2-pse / halo2-axiom should always be turned on; not sure how to enforce this with Cargo
 halo2-pse = ["snark-verifier/halo2-pse", "dep:serde_with"]
 halo2-axiom = ["snark-verifier/halo2-axiom"]
+midnight = [
+    "dep:midnight-proofs",
+    "dep:midnight-curves",
+    "dep:midnight-circuits",
+    "dep:midnight-zk-stdlib",
+    "dep:ff",
+    "dep:anyhow",
+]
 
 # zkevm = ["dep:zkevm-circuits", "dep:bus-mapping", "dep:mock", "dep:eth-types"]
 
@@ -88,3 +107,9 @@ harness = false
 [[example]]
 name = "standard_plonk"
 required-features = ["loader_halo2", "loader_evm"]
+
+[[example]]
+name = "midnight_poseidon_evm"
+# EVM transcript flow plus optional Solidity/revm generation checks.
+required-features = ["midnight", "loader_evm"]
+path = "examples/midnight_poseidon_evm.rs"

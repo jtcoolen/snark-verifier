@@ -9,7 +9,7 @@ use crate::{
     },
     verifier::plonk::protocol::{
         CommonPolynomial::Lagrange, CommonPolynomialEvaluation, LinearizationStrategy,
-        PlonkProtocol, Query,
+        PlonkProtocol, Query, QuotientChunkBase,
     },
     Error,
 };
@@ -28,6 +28,8 @@ where
     pub committed_instances: Option<Vec<L::LoadedEcPoint>>,
     /// Commitments of witness polynomials read from transcript.
     pub witnesses: Vec<L::LoadedEcPoint>,
+    /// Additional commitments (e.g. trash argument) read after witnesses.
+    pub extra_commitments: Vec<L::LoadedEcPoint>,
     /// Challenges squeezed from transcript.
     pub challenges: Vec<L::LoadedScalar>,
     /// Quotient commitments read from transcript.
@@ -48,32 +50,31 @@ where
     L: Loader<C>,
     AS: AccumulationScheme<C, L> + PolynomialCommitmentScheme<C, L, Output = AS::Accumulator>,
 {
-    /// Reads each part from transcript as [`PlonkProof`].
-    pub fn read<T, AE>(
-        svk: &<AS as PolynomialCommitmentScheme<C, L>>::VerifyingKey,
+    /// Hash committed-instance columns into the transcript and return commitments for accumulator decoding.
+    fn build_committed_instances<T>(
         protocol: &PlonkProtocol<C, L>,
         instances: &[Vec<L::LoadedScalar>],
+        committed_instance_commitments: Option<&[L::LoadedEcPoint]>,
         transcript: &mut T,
-    ) -> Result<Self, Error>
+    ) -> Result<Option<Vec<L::LoadedEcPoint>>, Error>
     where
         T: TranscriptRead<C, L>,
-        AE: AccumulatorEncoding<C, L, Accumulator = AS::Accumulator>,
     {
-        if let Some(transcript_initial_state) = &protocol.transcript_initial_state {
-            transcript.common_scalar(transcript_initial_state)?;
-        }
+        // Legacy protocols use an instance committing key to derive commitments directly from scalars.
+        if let Some(ick) = &protocol.instance_committing_key {
+            if committed_instance_commitments.is_some() || protocol.committed_instance_count > 0 {
+                return Err(Error::InvalidProtocol(
+                    "Committed instances cannot be combined with instance committing key"
+                        .to_string(),
+                ));
+            }
 
-        if protocol.num_instance != instances.iter().map(|instances| instances.len()).collect_vec()
-        {
-            return Err(Error::InvalidInstances);
-        }
-
-        let committed_instances = if let Some(ick) = &protocol.instance_committing_key {
             let loader = transcript.loader();
             let bases =
                 ick.bases.iter().map(|value| loader.ec_point_load_const(value)).collect_vec();
             let constant = ick.constant.as_ref().map(|value| loader.ec_point_load_const(value));
 
+            // Commit each instance column with the configured basis and absorb those commitments.
             let committed_instances = instances
                 .iter()
                 .map(|instances| {
@@ -90,16 +91,115 @@ where
                 transcript.common_ec_point(committed_instance)?;
             }
 
-            Some(committed_instances)
-        } else {
-            for instances in instances.iter() {
-                for instance in instances.iter() {
-                    transcript.common_scalar(instance)?;
-                }
-            }
+            return Ok(Some(committed_instances));
+        }
 
-            None
-        };
+        // New metadata-driven layout limits how many front columns are externally committed.
+        let committed_count = protocol.committed_instance_count;
+        if committed_count > protocol.num_instance.len() {
+            return Err(Error::InvalidProtocol(format!(
+                "committed_instance_count {} exceeds num_instance columns {}",
+                committed_count,
+                protocol.num_instance.len()
+            )));
+        }
+
+        let mut full_committed_instances = Vec::new();
+
+        // Absorb caller-provided commitments for the committed prefix.
+        if committed_count > 0 {
+            let committed = committed_instance_commitments.ok_or(Error::InvalidInstances)?;
+            if committed.len() != committed_count {
+                return Err(Error::InvalidInstances);
+            }
+            for commitment in committed.iter() {
+                transcript.common_ec_point(commitment)?;
+            }
+            full_committed_instances.extend(committed.iter().cloned());
+        }
+
+        let loader = transcript.loader().clone();
+        for (column_idx, instances) in instances.iter().enumerate() {
+            // Skip scalar absorption for columns that are represented by commitments.
+            if column_idx < committed_count {
+                continue;
+            }
+            // Some transcript formats bind each instance-column length before its values.
+            if protocol.hash_instance_lengths {
+                let len = loader.load_const(&C::Scalar::from(instances.len() as u64));
+                transcript.common_scalar(&len)?;
+            }
+            for instance in instances.iter() {
+                transcript.common_scalar(instance)?;
+            }
+        }
+
+        if committed_count > 0 {
+            Ok(Some(full_committed_instances))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn append_committed_instance_placeholders(
+        protocol: &PlonkProtocol<C, L>,
+        committed_instances: &mut Option<Vec<L::LoadedEcPoint>>,
+        loader: &L,
+    ) {
+        if protocol.committed_instance_count > 0 {
+            if let Some(committed_instances) = committed_instances.as_mut() {
+                committed_instances.extend(
+                    (protocol.committed_instance_count..protocol.num_instance.len())
+                        .map(|_| loader.ec_point_load_zero()),
+                );
+            }
+        }
+    }
+
+    /// Reads each part from transcript as [`PlonkProof`].
+    pub fn read<T, AE>(
+        svk: &<AS as PolynomialCommitmentScheme<C, L>>::VerifyingKey,
+        protocol: &PlonkProtocol<C, L>,
+        instances: &[Vec<L::LoadedScalar>],
+        transcript: &mut T,
+    ) -> Result<Self, Error>
+    where
+        T: TranscriptRead<C, L>,
+        AE: AccumulatorEncoding<C, L, Accumulator = AS::Accumulator>,
+    {
+        Self::read_with_committed_instances::<T, AE>(svk, protocol, instances, None, transcript)
+    }
+
+    /// Reads each part from transcript while hashing externally provided committed instances.
+    pub fn read_with_committed_instances<T, AE>(
+        svk: &<AS as PolynomialCommitmentScheme<C, L>>::VerifyingKey,
+        protocol: &PlonkProtocol<C, L>,
+        instances: &[Vec<L::LoadedScalar>],
+        committed_instance_commitments: Option<&[L::LoadedEcPoint]>,
+        transcript: &mut T,
+    ) -> Result<Self, Error>
+    where
+        T: TranscriptRead<C, L>,
+        AE: AccumulatorEncoding<C, L, Accumulator = AS::Accumulator>,
+    {
+        // Reconstruct the transcript domain-separation seed used by the prover.
+        if let Some(transcript_initial_state) = &protocol.transcript_initial_state {
+            transcript.common_scalar(transcript_initial_state)?;
+        }
+
+        // Ensure provided public inputs match the protocol-declared column lengths.
+        if protocol.num_instance != instances.iter().map(|instances| instances.len()).collect_vec()
+        {
+            return Err(Error::InvalidInstances);
+        }
+
+        // Absorb committed and plain instance data using whichever layout this protocol declares.
+        let mut committed_instances = Self::build_committed_instances(
+            protocol,
+            instances,
+            committed_instance_commitments,
+            transcript,
+        )?;
 
         let (witnesses, challenges) = {
             let (witnesses, challenges) = protocol
@@ -119,6 +219,13 @@ where
             )
         };
 
+        // Trailing challenges that are not tied to an advice phase (e.g. trash challenge).
+        let mut challenges = challenges;
+        challenges.extend(transcript.squeeze_n_challenges(protocol.trailing_challenges));
+
+        // Extra commitments that appear after challenges (e.g. trash commitments).
+        let extra_commitments = transcript.read_n_ec_points(protocol.extra_commitments)?;
+
         let quotients = transcript.read_n_ec_points(protocol.quotient.num_chunk())?;
 
         let z = transcript.squeeze_challenge();
@@ -129,6 +236,12 @@ where
             &Self::empty_queries(protocol),
             transcript,
         )?;
+
+        Self::append_committed_instance_placeholders(
+            protocol,
+            &mut committed_instances,
+            transcript.loader(),
+        );
 
         let old_accumulators = protocol
             .accumulator_indices
@@ -143,6 +256,7 @@ where
         Ok(Self {
             committed_instances,
             witnesses,
+            extra_commitments,
             challenges,
             quotients,
             z,
@@ -214,6 +328,7 @@ where
                     }),
             )
             .chain(self.witnesses.iter().map(Msm::base))
+            .chain(self.extra_commitments.iter().map(Msm::base))
             .collect_vec();
 
         let numerator = protocol.quotient.numerator.evaluate(
@@ -252,12 +367,32 @@ where
         )?;
 
         let quotient_query = Query::new(
-            protocol.preprocessed.len() + protocol.num_instance.len() + self.witnesses.len(),
+            protocol.preprocessed.len()
+                + protocol.num_instance.len()
+                + self.witnesses.len()
+                + self.extra_commitments.len(),
             Rotation::cur(),
         );
-        let quotient = common_poly_eval
-            .zn()
-            .pow_const(protocol.quotient.chunk_degree as u64)
+        // Support both Halo2's z^n split and Midnight's (z^n / z) split when recombining chunks.
+        let quotient_base = match protocol.quotient.chunk_base {
+            QuotientChunkBase::Zn => {
+                common_poly_eval.zn().pow_const(protocol.quotient.chunk_degree as u64)
+            }
+            QuotientChunkBase::ZnMinusOne => {
+                let z_inv = common_poly_eval
+                    .get(crate::verifier::plonk::CommonPolynomial::Identity)
+                    .invert()
+                    .ok_or_else(|| {
+                        Error::InvalidProtocol(
+                            "Missing inverse for quotient split base".to_string(),
+                        )
+                    })?;
+                (common_poly_eval.zn().clone() * &z_inv)
+                    .pow_const(protocol.quotient.chunk_degree as u64)
+            }
+        };
+        // Fold each quotient chunk with successive powers of the selected split base.
+        let quotient = quotient_base
             .powers(self.quotients.len())
             .into_iter()
             .zip(self.quotients.iter().map(Msm::base))
@@ -331,5 +466,164 @@ where
             .collect();
 
         Ok(evals)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        loader::native::{self, NativeLoader},
+        pcs::kzg::{Gwc19, KzgAs},
+        util::{
+            arithmetic::Domain,
+            transcript::{Transcript as SvTranscript, TranscriptRead as SvTranscriptRead},
+        },
+        verifier::plonk::{Expression, QuotientPolynomial},
+    };
+    use halo2_base::halo2_proofs::halo2curves::bls12_381::{Bls12, Fr, G1Affine};
+
+    type TestAs = KzgAs<Bls12, Gwc19>;
+    type TestProof = PlonkProof<G1Affine, NativeLoader, TestAs>;
+
+    #[derive(Default)]
+    struct RecordingTranscript {
+        points: Vec<G1Affine>,
+        scalars: Vec<Fr>,
+    }
+
+    impl SvTranscript<G1Affine, NativeLoader> for RecordingTranscript {
+        fn loader(&self) -> &NativeLoader {
+            &native::LOADER
+        }
+
+        fn squeeze_challenge(&mut self) -> Fr {
+            panic!("squeeze_challenge should not be called in this test")
+        }
+
+        fn common_ec_point(&mut self, ec_point: &G1Affine) -> Result<(), Error> {
+            self.points.push(*ec_point);
+            Ok(())
+        }
+
+        fn common_scalar(&mut self, scalar: &Fr) -> Result<(), Error> {
+            self.scalars.push(*scalar);
+            Ok(())
+        }
+    }
+
+    impl SvTranscriptRead<G1Affine, NativeLoader> for RecordingTranscript {
+        fn read_scalar(&mut self) -> Result<Fr, Error> {
+            panic!("read_scalar should not be called in this test")
+        }
+
+        fn read_ec_point(&mut self) -> Result<G1Affine, Error> {
+            panic!("read_ec_point should not be called in this test")
+        }
+    }
+
+    fn test_protocol(
+        committed_instance_count: usize,
+        hash_instance_lengths: bool,
+        num_instance: Vec<usize>,
+    ) -> PlonkProtocol<G1Affine, NativeLoader> {
+        PlonkProtocol {
+            domain: Domain::new(1, Fr::from(2)),
+            domain_as_witness: None,
+            preprocessed: vec![],
+            num_instance,
+            num_witness: vec![],
+            num_challenge: vec![],
+            committed_instance_count,
+            hash_instance_lengths,
+            trailing_challenges: 0,
+            extra_commitments: 0,
+            evaluations: vec![],
+            queries: vec![],
+            quotient: QuotientPolynomial {
+                chunk_degree: 1,
+                chunk_base: QuotientChunkBase::Zn,
+                num_chunk_override: Some(0),
+                numerator: Expression::Constant(Fr::from(0)),
+            },
+            transcript_initial_state: None,
+            instance_committing_key: None,
+            linearization: None,
+            accumulator_indices: vec![],
+        }
+    }
+
+    #[test]
+    fn committed_prefix_and_hashed_lengths_follow_expected_order() {
+        let protocol = test_protocol(1, true, vec![0, 2, 1]);
+        let commitment = G1Affine::identity();
+        let commitments = vec![commitment];
+        let instances = vec![vec![], vec![Fr::from(10), Fr::from(11)], vec![Fr::from(12)]];
+        let mut transcript = RecordingTranscript::default();
+
+        let committed = TestProof::build_committed_instances(
+            &protocol,
+            &instances,
+            Some(commitments.as_slice()),
+            &mut transcript,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(committed, commitments);
+        assert_eq!(transcript.points, vec![commitment]);
+        assert_eq!(
+            transcript.scalars,
+            vec![Fr::from(2), Fr::from(10), Fr::from(11), Fr::from(1), Fr::from(12)]
+        );
+    }
+
+    #[test]
+    fn committed_layout_mismatches_return_deterministic_errors() {
+        let protocol = test_protocol(3, true, vec![0, 0]);
+        let mut transcript = RecordingTranscript::default();
+        let err = TestProof::build_committed_instances(
+            &protocol,
+            &[vec![], vec![]],
+            Some(&[]),
+            &mut transcript,
+        )
+        .unwrap_err();
+        match err {
+            Error::InvalidProtocol(message) => {
+                assert!(message.contains("committed_instance_count"));
+            }
+            other => panic!("expected InvalidProtocol, got {other:?}"),
+        }
+
+        let protocol = test_protocol(1, false, vec![0, 1]);
+        let mut transcript = RecordingTranscript::default();
+        let err = TestProof::build_committed_instances(
+            &protocol,
+            &[vec![], vec![Fr::from(9)]],
+            Some(&[]),
+            &mut transcript,
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::InvalidInstances));
+    }
+
+    #[test]
+    fn placeholder_extension_matches_declared_instance_layout() {
+        let protocol = test_protocol(1, false, vec![0, 2, 1]);
+        let commitment = G1Affine::generator();
+        let mut committed = Some(vec![commitment]);
+
+        TestProof::append_committed_instance_placeholders(
+            &protocol,
+            &mut committed,
+            &native::LOADER,
+        );
+        let committed = committed.unwrap();
+
+        assert_eq!(committed.len(), protocol.num_instance.len());
+        assert_eq!(committed[0], commitment);
+        assert_eq!(committed[1], G1Affine::identity());
+        assert_eq!(committed[2], G1Affine::identity());
     }
 }
