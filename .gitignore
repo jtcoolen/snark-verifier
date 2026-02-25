@@ -2,6 +2,7 @@
 .DS_Store
 
 /target
+snark-verifier-sdk/target/midnight/
 testdata
 
 # Cargo.lock

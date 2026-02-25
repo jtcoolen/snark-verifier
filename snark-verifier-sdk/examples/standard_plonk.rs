@@ -47,7 +47,7 @@ mod application {
                         [a, b, c].map(|column| meta.query_advice(column, Rotation::cur()));
                     let [q_a, q_b, q_c, q_ab, constant] = [q_a, q_b, q_c, q_ab, constant]
                         .map(|column| meta.query_fixed(column, Rotation::cur()));
-                let instance = meta.query_instance(instance, Rotation::cur());
+                    let instance = meta.query_instance(instance, Rotation::cur());
                     Some(
                         q_a * a.clone()
                             + q_b * b.clone()
@@ -200,9 +200,7 @@ fn main() {
                 }
             }
         } else {
-            println!(
-                "revm verification skipped (set RUN_REVM=1 to run local revm simulation)"
-            );
+            println!("revm verification skipped (set RUN_REVM=1 to run local revm simulation)");
         }
     }
 }
