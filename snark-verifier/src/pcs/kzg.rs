@@ -11,7 +11,8 @@ mod multiopen;
 pub use accumulation::{KzgAs, KzgAsProvingKey, KzgAsVerifyingKey};
 pub use accumulator::{KzgAccumulator, LimbsEncoding};
 pub use decider::KzgDecidingKey;
-pub use multiopen::{Bdfg21, Bdfg21Proof, Gwc19, Gwc19Proof};
+// Re-export Midnight PCS flavor alongside the existing GWC/BDFG variants.
+pub use multiopen::{Bdfg21, Bdfg21Proof, Gwc19, Gwc19Proof, Midnight, MidnightProof};
 
 #[cfg(feature = "loader_halo2")]
 pub use accumulator::LimbsEncodingInstructions;
