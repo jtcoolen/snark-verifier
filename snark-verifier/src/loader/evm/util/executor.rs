@@ -106,9 +106,7 @@ pub fn deploy_and_call(deployment_code: Vec<u8>, calldata: Vec<u8>) -> Result<u6
         .data(Bytes::from(calldata))
         .build_fill();
 
-    let result = evm
-        .transact_commit(call_tx)
-        .map_err(|err| format!("revm call error: {err}"))?;
+    let result = evm.transact_commit(call_tx).map_err(|err| format!("revm call error: {err}"))?;
     match result {
         ExecutionResult::Success { gas_used, .. } => Ok(gas_used),
         ExecutionResult::Revert { gas_used, output } => {
