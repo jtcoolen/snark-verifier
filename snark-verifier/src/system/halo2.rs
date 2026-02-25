@@ -153,6 +153,11 @@ pub fn compile<'a, C: CurveAffine, P: Params<'a, C>>(
         num_instance: polynomials.num_instance(),
         num_witness: polynomials.num_witness(),
         num_challenge: polynomials.num_challenge(),
+        // Vanilla Halo2 protocols start with no transcript-layout extensions enabled.
+        committed_instance_count: 0,
+        hash_instance_lengths: false,
+        trailing_challenges: 0,
+        extra_commitments: 0,
         evaluations,
         queries,
         quotient: polynomials.quotient(),
@@ -651,8 +656,14 @@ impl<'a, F: PrimeField> Polynomials<'a, F> {
                     .chain(self.lookup_constraints(t))
             })
             .collect_vec();
-        let numerator = Expression::DistributePowers(constraints, self.alpha().into());
-        QuotientPolynomial { chunk_degree: 1, numerator }
+        let numerator = halo2_distribute_powers(constraints, self.alpha());
+        QuotientPolynomial {
+            chunk_degree: 1,
+            // Halo2's default split base is z^n unless protocol metadata overrides it later.
+            chunk_base: crate::verifier::plonk::protocol::QuotientChunkBase::Zn,
+            num_chunk_override: None,
+            numerator,
+        }
     }
 
     fn accumulator_indices(
