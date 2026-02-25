@@ -6,6 +6,13 @@ use crate::halo2_proofs::{
     transcript::{EncodedChallenge, Transcript},
 };
 use crate::{
+    system::halo2::{
+        expression::{
+            distribute_powers as halo2_distribute_powers, l_active as halo2_l_active,
+            l_blind as halo2_l_blind, l_last as halo2_l_last, rotation_last as halo2_rotation_last,
+        },
+        layout::{permutation_chunk_count, remap_by_phase},
+    },
     util::{
         arithmetic::{root_of_unity, CurveAffine, Domain, PrimeField, Rotation},
         Itertools,
@@ -15,9 +22,10 @@ use crate::{
         QuotientPolynomial,
     },
 };
-use num_integer::Integer;
 use std::{io, iter, mem::size_of};
 
+pub mod expression;
+pub mod layout;
 pub mod strategy;
 pub mod transcript;
 
@@ -195,25 +203,8 @@ impl<'a, F: PrimeField> Polynomials<'a, F> {
             degree - 1
         };
 
-        let num_phase = *cs.advice_column_phase().iter().max().unwrap_or(&0) as usize + 1;
-        let remapping = |phase: Vec<u8>| {
-            let num = phase.iter().fold(vec![0; num_phase], |mut num, phase| {
-                num[*phase as usize] += 1;
-                num
-            });
-            let index = phase
-                .iter()
-                .scan(vec![0; num_phase], |state, phase| {
-                    let index = state[*phase as usize];
-                    state[*phase as usize] += 1;
-                    Some(index)
-                })
-                .collect::<Vec<_>>();
-            (num, index)
-        };
-
-        let (num_advice, advice_index) = remapping(cs.advice_column_phase());
-        let (num_challenge, challenge_index) = remapping(cs.challenge_phase());
+        let (num_advice, advice_index) = remap_by_phase(cs.advice_column_phase());
+        let (num_challenge, challenge_index) = remap_by_phase(cs.challenge_phase());
         assert_eq!(num_advice.iter().sum::<usize>(), cs.num_advice_columns());
         assert_eq!(num_challenge.iter().sum::<usize>(), cs.num_challenges());
 
@@ -231,9 +222,9 @@ impl<'a, F: PrimeField> Polynomials<'a, F> {
             challenge_index,
             num_lookup_permuted: 2 * cs.lookups().len(),
             permutation_chunk_size,
-            num_permutation_z: Integer::div_ceil(
-                &cs.permutation().get_columns().len(),
-                &permutation_chunk_size,
+            num_permutation_z: permutation_chunk_count(
+                cs.permutation().get_columns().len(),
+                permutation_chunk_size,
             ),
             num_lookup_z: cs.lookups().len(),
         }
@@ -244,7 +235,8 @@ impl<'a, F: PrimeField> Polynomials<'a, F> {
     }
 
     fn num_instance(&self) -> Vec<usize> {
-        iter::repeat_n(self.num_instance.clone(), self.num_proof).flatten().collect()
+        // Repeat the per-proof instance layout once per proof and flatten into one verifier vector.
+        iter::repeat(self.num_instance.clone()).take(self.num_proof).flatten().collect()
     }
 
     fn num_witness(&self) -> Vec<usize> {
@@ -455,26 +447,23 @@ impl<'a, F: PrimeField> Polynomials<'a, F> {
     }
 
     fn rotation_last(&self) -> Rotation {
-        Rotation(-((self.cs.blinding_factors() + 1) as i32))
+        halo2_rotation_last(self.cs.blinding_factors())
     }
 
     fn l_last(&self) -> Expression<F> {
         if self.zk {
-            Expression::CommonPolynomial(CommonPolynomial::Lagrange(self.rotation_last().0))
+            halo2_l_last(self.rotation_last())
         } else {
             Expression::CommonPolynomial(CommonPolynomial::Lagrange(-1))
         }
     }
 
     fn l_blind(&self) -> Expression<F> {
-        (self.rotation_last().0 + 1..0)
-            .map(CommonPolynomial::Lagrange)
-            .map(Expression::CommonPolynomial)
-            .sum()
+        halo2_l_blind(self.rotation_last())
     }
 
     fn l_active(&self) -> Expression<F> {
-        Expression::Constant(F::ONE) - self.l_last() - self.l_blind()
+        halo2_l_active(self.l_last(), self.l_blind())
     }
 
     fn system_challenge_offset(&self) -> usize {
@@ -611,9 +600,9 @@ impl<'a, F: PrimeField> Polynomials<'a, F> {
             .collect_vec();
 
         let compress = |expressions: &'a [plonk::Expression<F>]| {
-            Expression::DistributePowers(
+            halo2_distribute_powers(
                 expressions.iter().map(|expression| self.convert(expression, t)).collect(),
-                self.theta().into(),
+                self.theta(),
             )
         };
 

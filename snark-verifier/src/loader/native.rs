@@ -58,9 +58,10 @@ impl<C: CurveAffine> EcPointLoader<C> for NativeLoader {
         lhs: &Self::LoadedEcPoint,
         rhs: &Self::LoadedEcPoint,
     ) {
-        lhs.eq(rhs)
-            .then_some(())
-            .unwrap_or_else(|| panic!("{:?}", Error::AssertionFailure(annotation.to_string())))
+        // Keep assertion failure control flow explicit so panics are obvious in debugging backtraces.
+        if !lhs.eq(rhs) {
+            panic!("{:?}", Error::AssertionFailure(annotation.to_string()));
+        }
     }
 
     fn multi_scalar_multiplication(
@@ -84,9 +85,10 @@ impl<F: PrimeField> ScalarLoader<F> for NativeLoader {
     }
 
     fn assert_eq(&self, annotation: &str, lhs: &Self::LoadedScalar, rhs: &Self::LoadedScalar) {
-        lhs.eq(rhs)
-            .then_some(())
-            .unwrap_or_else(|| panic!("{:?}", Error::AssertionFailure(annotation.to_string())))
+        // Keep assertion failure control flow explicit so panics are obvious in debugging backtraces.
+        if !lhs.eq(rhs) {
+            panic!("{:?}", Error::AssertionFailure(annotation.to_string()));
+        }
     }
 }
 

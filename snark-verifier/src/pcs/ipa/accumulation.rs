@@ -192,7 +192,8 @@ where
                     u,
                     iter::empty()
                         .chain([b, a])
-                        .chain(iter::repeat_n(C::Scalar::ZERO, pk.domain.n - 2))
+                        // Fill the remaining basis coordinates with zeros after placing (b, a).
+                        .chain(iter::repeat(C::Scalar::ZERO).take(pk.domain.n - 2))
                         .collect(),
                 )
             }))
