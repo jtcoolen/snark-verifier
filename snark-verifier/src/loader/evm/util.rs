@@ -124,12 +124,12 @@ pub fn compile_solidity(code: &str) -> Vec<u8> {
     }
     let stdout = output.stdout;
     let stderr = output.stderr;
-    let binary = *split_by_ascii_whitespace(&stdout)
-        .last()
-        .unwrap_or_else(|| panic!(
+    let binary = *split_by_ascii_whitespace(&stdout).last().unwrap_or_else(|| {
+        panic!(
             "solc --bin produced no bytecode output; stderr: {}",
             String::from_utf8_lossy(&stderr)
-        ));
+        )
+    });
     assert!(!binary.is_empty());
     hex::decode(binary).unwrap()
 }

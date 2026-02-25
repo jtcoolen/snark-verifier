@@ -7,7 +7,7 @@ use crate::{
         EcPointLoader, LoadedEcPoint, LoadedScalar, Loader, ScalarLoader,
     },
     util::{
-        arithmetic::{CurveAffine, FieldOps, PrimeField},
+        arithmetic::{Coordinates, CurveAffine, FieldOps, PrimeField},
         Itertools,
     },
 };
@@ -75,13 +75,11 @@ fn be_bytes_to_u256(bytes: &[u8]) -> U256 {
 fn le_bytes_to_padded_be_words(bytes_le: &[u8]) -> [U256; 2] {
     assert!(bytes_le.len() <= BLS_ENCODED_FP_BYTES);
     let mut padded = [0u8; BLS_ENCODED_FP_BYTES];
+    // Field elements come in little-endian; precompile ABI expects big-endian words.
     let be = bytes_le.iter().rev().copied().collect_vec();
     let offset = BLS_ENCODED_FP_BYTES - be.len();
     padded[offset..].copy_from_slice(&be);
-    [
-        be_bytes_to_u256(&padded[..0x20]),
-        be_bytes_to_u256(&padded[0x20..BLS_ENCODED_FP_BYTES]),
-    ]
+    [be_bytes_to_u256(&padded[..0x20]), be_bytes_to_u256(&padded[0x20..BLS_ENCODED_FP_BYTES])]
 }
 
 impl EvmLoader {
@@ -196,8 +194,7 @@ impl EvmLoader {
             mstore({:#x}, 0)
             calldatacopy({:#x}, {x_cd_ptr:#x}, {coord_bytes:#x})
             calldatacopy({:#x}, {y_cd_ptr:#x}, {coord_bytes:#x})
-        }}"
-            ,
+        }}",
             x_ptr + 0x20,
             y_ptr + 0x20,
             x_ptr + pad,
@@ -352,6 +349,20 @@ impl EvmLoader {
         self.ec_point(Value::Memory(ptr))
     }
 
+    fn staticcall_with_lengths(
+        self: &Rc<Self>,
+        precompile: Precompiled,
+        cd_ptr: usize,
+        cd_len: usize,
+        rd_ptr: usize,
+        rd_len: usize,
+    ) {
+        // Shared staticcall emission for both fixed-size and runtime-sized precompile invocations.
+        let a = precompile as usize;
+        let code = format!("success := and(eq(staticcall(gas(), {a:#x}, {cd_ptr:#x}, {cd_len:#x}, {rd_ptr:#x}, {rd_len:#x}), 1), success)");
+        self.code.borrow_mut().runtime_append(code);
+    }
+
     fn staticcall(self: &Rc<Self>, precompile: Precompiled, cd_ptr: usize, rd_ptr: usize) {
         let (cd_len, rd_len) = match precompile {
             Precompiled::BigModExp => (0xc0, 0x20),
@@ -362,9 +373,8 @@ impl EvmLoader {
             //   [G1 (128) || G2 (256)] * 2 = 768 bytes
             Precompiled::Bls12_381Pairing => (2 * (BLS_G1_BYTES + BLS_G2_BYTES), 0x20),
         };
-        let a = precompile as usize;
-        let code = format!("success := and(eq(staticcall(gas(), {a:#x}, {cd_ptr:#x}, {cd_len:#x}, {rd_ptr:#x}, {rd_len:#x}), 1), success)");
-        self.code.borrow_mut().runtime_append(code);
+        // Fixed-size precompile path delegates to the generic helper.
+        self.staticcall_with_lengths(precompile, cd_ptr, cd_len, rd_ptr, rd_len);
     }
 
     fn invert(self: &Rc<Self>, scalar: &Scalar) -> Scalar {
@@ -382,6 +392,7 @@ impl EvmLoader {
         self.scalar(Value::Memory(rd_ptr))
     }
 
+    #[allow(dead_code)]
     fn ec_point_add(self: &Rc<Self>, lhs: &EcPoint, rhs: &EcPoint) -> EcPoint {
         let rd_ptr = self.dup_ec_point(lhs).ptr();
         self.dup_ec_point(rhs);
@@ -396,6 +407,37 @@ impl EvmLoader {
         self.ec_point(Value::Memory(rd_ptr))
     }
 
+    fn ec_point_multi_scalar_mul(self: &Rc<Self>, pairs: &[(&Scalar, &EcPoint)]) -> EcPoint {
+        assert!(!pairs.is_empty(), "pairs should not be empty");
+
+        // Preserve tiny-case behavior for compatibility and avoid oversized precompile calldata.
+        if pairs.len() == 1 {
+            let (scalar, ec_point) = pairs[0];
+            return match scalar.value {
+                Value::Constant(constant) if U256::from(1) == constant => ec_point.clone(),
+                _ => self.ec_point_scalar_mul(ec_point, scalar),
+            };
+        }
+
+        // Pack all (point, scalar) pairs contiguously and call G1MSM once.
+        let pair_bytes = BLS_G1_BYTES + 0x20;
+        let cd_len = pairs.len().checked_mul(pair_bytes).expect("MSM calldata length overflow");
+        let cd_ptr = self.ptr();
+        for (scalar, ec_point) in pairs.iter().copied() {
+            self.dup_ec_point(ec_point);
+            self.dup_scalar(scalar);
+        }
+        let rd_ptr = self.allocate(BLS_G1_BYTES);
+        self.staticcall_with_lengths(
+            Precompiled::Bls12_381G1Msm,
+            cd_ptr,
+            cd_len,
+            rd_ptr,
+            BLS_G1_BYTES,
+        );
+        self.ec_point(Value::Memory(rd_ptr))
+    }
+
     /// Performs pairing.
     pub fn pairing(
         self: &Rc<Self>,
@@ -404,11 +446,7 @@ impl EvmLoader {
         rhs: &EcPoint,
         minus_s_g2: &[U256],
     ) {
-        assert_eq!(
-            g2.len(),
-            BLS_G2_BYTES / 0x20,
-            "g2 must contain exactly 8 words (256 bytes)"
-        );
+        assert_eq!(g2.len(), BLS_G2_BYTES / 0x20, "g2 must contain exactly 8 words (256 bytes)");
         assert_eq!(
             minus_s_g2.len(),
             BLS_G2_BYTES / 0x20,
@@ -481,6 +519,10 @@ impl EvmLoader {
 
     fn neg(self: &Rc<Self>, scalar: &Scalar) -> Scalar {
         if let Value::Constant(constant) = scalar.value {
+            // Preserve exact zero to avoid wrapping `modulus - 0` into an invalid field representative.
+            if constant == U256::ZERO {
+                return self.scalar(Value::Constant(U256::ZERO));
+            }
             return self.scalar(Value::Constant(self.scalar_modulus - constant));
         }
 
@@ -710,9 +752,13 @@ where
     type LoadedEcPoint = EcPoint;
 
     fn ec_point_load_const(&self, value: &C) -> EcPoint {
-        let coordinates = value.coordinates().unwrap();
-        let [x_words, y_words] = [coordinates.x(), coordinates.y()]
-            .map(|coordinate| le_bytes_to_padded_be_words(coordinate.to_repr().as_ref()));
+        // Encode affine coordinates in EVM word layout, with identity mapped to (0,0).
+        let [x_words, y_words] = match Option::<Coordinates<C>>::from(value.coordinates()) {
+            Some(coordinates) => [coordinates.x(), coordinates.y()]
+                .map(|coordinate| le_bytes_to_padded_be_words(coordinate.to_repr().as_ref())),
+            // EVM precompiles encode point-at-infinity as (0, 0).
+            None => [[U256::ZERO, U256::ZERO], [U256::ZERO, U256::ZERO]],
+        };
 
         let ptr = self.allocate(BLS_G1_BYTES);
         let code = format!(
@@ -743,15 +789,8 @@ where
     fn multi_scalar_multiplication(
         pairs: &[(&<Self as ScalarLoader<C::Scalar>>::LoadedScalar, &EcPoint)],
     ) -> EcPoint {
-        pairs
-            .iter()
-            .cloned()
-            .map(|(scalar, ec_point)| match scalar.value {
-                Value::Constant(constant) if U256::from(1) == constant => ec_point.clone(),
-                _ => ec_point.loader.ec_point_scalar_mul(ec_point, scalar),
-            })
-            .reduce(|acc, ec_point| acc.loader.ec_point_add(&acc, &ec_point))
-            .expect("pairs should not be empty")
+        // Route all MSM calls through the batched G1MSM precompile helper.
+        pairs.first().expect("pairs should not be empty").1.loader.ec_point_multi_scalar_mul(pairs)
     }
 }
 
@@ -886,27 +925,51 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
     // 4. values[n] <- products[n - 1] * inv (values[n]^{-1})
     // 5. inv <- v_n * inv
     fn batch_invert<'a>(values: impl IntoIterator<Item = &'a mut Scalar>) {
-        let values = values.into_iter().collect_vec();
+        let mut values = values.into_iter().collect_vec();
+        // No work for empty batches.
+        if values.is_empty() {
+            return;
+        }
+
         let loader = &values.first().unwrap().loader;
-        let products = iter::once(values[0].clone())
-            .chain(
-                iter::repeat_with(|| loader.allocate(0x20))
-                    .map(|ptr| loader.scalar(Value::Memory(ptr)))
-                    .take(values.len() - 1),
-            )
+        // Always use the zero-safe fast path for deterministic Midnight EVM behavior.
+
+        // Snapshot inputs into dedicated memory so repeated pointers do not get clobbered
+        // by reverse writes in the batch inversion schedule.
+        let inputs = values.iter().map(|value| loader.dup_scalar(value)).collect_vec();
+        let products = iter::repeat_with(|| loader.allocate(0x20))
+            .map(|ptr| loader.scalar(Value::Memory(ptr)))
+            .take(inputs.len())
+            .collect_vec();
+        let outputs = iter::repeat_with(|| loader.allocate(0x20))
+            .map(|ptr| loader.scalar(Value::Memory(ptr)))
+            .take(inputs.len())
             .collect_vec();
 
-        let initial_value = loader.push(products.first().unwrap());
-        let mut code = format!("let prod := {initial_value}\n");
-        for (value, product) in values.iter().zip(products.iter()).skip(1) {
-            let v = loader.push(value);
-            let ptr = product.ptr();
+        let first = loader.push(&inputs[0]);
+        let first_ptr = products[0].ptr();
+        let mut code = format!(
+            "
+            let v := {first}
+            // Replace zero inputs with one while building products; zeros are restored later.
+            let isz := iszero(mod(v, f_q))
+            let masked := add(v, isz)
+            let prod := masked
+            mstore({first_ptr:#x}, prod)
+        "
+        );
+        for idx in 1..inputs.len() {
+            let v = loader.push(&inputs[idx]);
+            let ptr = products[idx].ptr();
             code.push_str(
                 format!(
                     "
-                prod := mulmod({v}, prod, f_q)
-                mstore({ptr:#x}, prod)
-            "
+                    v := {v}
+                    isz := iszero(mod(v, f_q))
+                    masked := add(v, isz)
+                    prod := mulmod(masked, prod, f_q)
+                    mstore({ptr:#x}, prod)
+                "
                 )
                 .as_str(),
             );
@@ -923,35 +986,51 @@ impl<F: PrimeField<Repr = [u8; 0x20]>> ScalarLoader<F> for Rc<EvmLoader> {
             "
             let inv := {inv}
             let v
+            let isz
+            let masked
         "
         );
-        for (value, product) in
-            values.iter().rev().zip(products.iter().rev().skip(1).map(Some).chain(iter::once(None)))
-        {
-            if let Some(product) = product {
-                let val_ptr = value.ptr();
-                let prod_ptr = product.ptr();
-                let v = loader.push(value);
-                code.push_str(
-                    format!(
-                        "
+        // Reverse pass writes each inverse, masking zeros back to zero via (1 - isz).
+        for idx in (1..inputs.len()).rev() {
+            let out_ptr = outputs[idx].ptr();
+            let prod_ptr = products[idx - 1].ptr();
+            let v = loader.push(&inputs[idx]);
+            code.push_str(
+                format!(
+                    "
                     v := {v}
-                    mstore({val_ptr}, mulmod(mload({prod_ptr:#x}), inv, f_q))
-                    inv := mulmod(v, inv, f_q)
+                    isz := iszero(mod(v, f_q))
+                    masked := add(v, isz)
+                    mstore({out_ptr:#x}, mulmod(mulmod(mload({prod_ptr:#x}), inv, f_q), sub(1, isz), f_q))
+                    inv := mulmod(masked, inv, f_q)
                 "
-                    )
-                    .as_str(),
-                );
-            } else {
-                let ptr = value.ptr();
-                code.push_str(format!("mstore({ptr:#x}, inv)\n").as_str());
-            }
+                )
+                .as_str(),
+            );
         }
+        // Final element uses the remaining accumulator inverse.
+        let out_ptr = outputs[0].ptr();
+        let v = loader.push(&inputs[0]);
+        code.push_str(
+            format!(
+                "
+                v := {v}
+                isz := iszero(mod(v, f_q))
+                mstore({out_ptr:#x}, mulmod(inv, sub(1, isz), f_q))
+            "
+            )
+            .as_str(),
+        );
         loader.code.borrow_mut().runtime_append(format!(
             "{{
             {code}
         }}"
         ));
+
+        // Publish outputs after assembly execution so aliased callers see final inverses only.
+        for (value, output) in values.iter_mut().zip(outputs.into_iter()) {
+            **value = output;
+        }
     }
 }
 
