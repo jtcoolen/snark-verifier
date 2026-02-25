@@ -468,3 +468,162 @@ where
         Ok(evals)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        loader::native::{self, NativeLoader},
+        pcs::kzg::{Gwc19, KzgAs},
+        util::{
+            arithmetic::Domain,
+            transcript::{Transcript as SvTranscript, TranscriptRead as SvTranscriptRead},
+        },
+        verifier::plonk::{Expression, QuotientPolynomial},
+    };
+    use halo2_base::halo2_proofs::halo2curves::bls12_381::{Bls12, Fr, G1Affine};
+
+    type TestAs = KzgAs<Bls12, Gwc19>;
+    type TestProof = PlonkProof<G1Affine, NativeLoader, TestAs>;
+
+    #[derive(Default)]
+    struct RecordingTranscript {
+        points: Vec<G1Affine>,
+        scalars: Vec<Fr>,
+    }
+
+    impl SvTranscript<G1Affine, NativeLoader> for RecordingTranscript {
+        fn loader(&self) -> &NativeLoader {
+            &native::LOADER
+        }
+
+        fn squeeze_challenge(&mut self) -> Fr {
+            panic!("squeeze_challenge should not be called in this test")
+        }
+
+        fn common_ec_point(&mut self, ec_point: &G1Affine) -> Result<(), Error> {
+            self.points.push(*ec_point);
+            Ok(())
+        }
+
+        fn common_scalar(&mut self, scalar: &Fr) -> Result<(), Error> {
+            self.scalars.push(*scalar);
+            Ok(())
+        }
+    }
+
+    impl SvTranscriptRead<G1Affine, NativeLoader> for RecordingTranscript {
+        fn read_scalar(&mut self) -> Result<Fr, Error> {
+            panic!("read_scalar should not be called in this test")
+        }
+
+        fn read_ec_point(&mut self) -> Result<G1Affine, Error> {
+            panic!("read_ec_point should not be called in this test")
+        }
+    }
+
+    fn test_protocol(
+        committed_instance_count: usize,
+        hash_instance_lengths: bool,
+        num_instance: Vec<usize>,
+    ) -> PlonkProtocol<G1Affine, NativeLoader> {
+        PlonkProtocol {
+            domain: Domain::new(1, Fr::from(2)),
+            domain_as_witness: None,
+            preprocessed: vec![],
+            num_instance,
+            num_witness: vec![],
+            num_challenge: vec![],
+            committed_instance_count,
+            hash_instance_lengths,
+            trailing_challenges: 0,
+            extra_commitments: 0,
+            evaluations: vec![],
+            queries: vec![],
+            quotient: QuotientPolynomial {
+                chunk_degree: 1,
+                chunk_base: QuotientChunkBase::Zn,
+                num_chunk_override: Some(0),
+                numerator: Expression::Constant(Fr::from(0)),
+            },
+            transcript_initial_state: None,
+            instance_committing_key: None,
+            linearization: None,
+            accumulator_indices: vec![],
+        }
+    }
+
+    #[test]
+    fn committed_prefix_and_hashed_lengths_follow_expected_order() {
+        let protocol = test_protocol(1, true, vec![0, 2, 1]);
+        let commitment = G1Affine::identity();
+        let commitments = vec![commitment];
+        let instances = vec![vec![], vec![Fr::from(10), Fr::from(11)], vec![Fr::from(12)]];
+        let mut transcript = RecordingTranscript::default();
+
+        let committed = TestProof::build_committed_instances(
+            &protocol,
+            &instances,
+            Some(commitments.as_slice()),
+            &mut transcript,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(committed, commitments);
+        assert_eq!(transcript.points, vec![commitment]);
+        assert_eq!(
+            transcript.scalars,
+            vec![Fr::from(2), Fr::from(10), Fr::from(11), Fr::from(1), Fr::from(12)]
+        );
+    }
+
+    #[test]
+    fn committed_layout_mismatches_return_deterministic_errors() {
+        let protocol = test_protocol(3, true, vec![0, 0]);
+        let mut transcript = RecordingTranscript::default();
+        let err = TestProof::build_committed_instances(
+            &protocol,
+            &[vec![], vec![]],
+            Some(&[]),
+            &mut transcript,
+        )
+        .unwrap_err();
+        match err {
+            Error::InvalidProtocol(message) => {
+                assert!(message.contains("committed_instance_count"));
+            }
+            other => panic!("expected InvalidProtocol, got {other:?}"),
+        }
+
+        let protocol = test_protocol(1, false, vec![0, 1]);
+        let mut transcript = RecordingTranscript::default();
+        let err = TestProof::build_committed_instances(
+            &protocol,
+            &[vec![], vec![Fr::from(9)]],
+            Some(&[]),
+            &mut transcript,
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::InvalidInstances));
+    }
+
+    #[test]
+    fn placeholder_extension_matches_declared_instance_layout() {
+        let protocol = test_protocol(1, false, vec![0, 2, 1]);
+        let commitment = G1Affine::generator();
+        let mut committed = Some(vec![commitment]);
+
+        TestProof::append_committed_instance_placeholders(
+            &protocol,
+            &mut committed,
+            &native::LOADER,
+        );
+        let committed = committed.unwrap();
+
+        assert_eq!(committed.len(), protocol.num_instance.len());
+        assert_eq!(committed[0], commitment);
+        assert_eq!(committed[1], G1Affine::identity());
+        assert_eq!(committed[2], G1Affine::identity());
+    }
+}
