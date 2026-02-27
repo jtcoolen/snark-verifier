@@ -9,7 +9,7 @@ use std::{
 };
 
 #[cfg(feature = "revm")]
-pub use executor::deploy_and_call;
+pub use executor::{deploy_and_call, deploy_unrolled_sharded_and_call};
 pub use ruint::aliases::{B160 as Address, B256, U256, U512};
 
 #[cfg(feature = "revm")]
