@@ -12,11 +12,12 @@ pub enum Precompiled {
 pub struct SolidityAssemblyCode {
     // runtime code area
     runtime: String,
+    runtime_blocks: Vec<String>,
 }
 
 impl SolidityAssemblyCode {
     pub fn new() -> Self {
-        Self { runtime: String::new() }
+        Self { runtime: String::new(), runtime_blocks: Vec::new() }
     }
 
     pub fn code(&self, scalar_modulus: String) -> String {
@@ -47,7 +48,18 @@ contract Halo2Verifier {{
     }
 
     pub fn runtime_append(&mut self, mut code: String) {
+        self.runtime_blocks.push(code.clone());
         code.push('\n');
         self.runtime.push_str(&code);
+    }
+
+    pub fn runtime_blocks(&self) -> &[String] {
+        &self.runtime_blocks
+    }
+}
+
+impl Default for SolidityAssemblyCode {
+    fn default() -> Self {
+        Self::new()
     }
 }
