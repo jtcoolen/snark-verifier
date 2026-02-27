@@ -106,6 +106,15 @@ fn main() {
         .expect("failed to generate Solidity verifier source");
     let bytecode =
         bundle.generate_evm_verifier_bytecode().expect("failed to compile Solidity verifier");
+    let unrolled_sharded = bundle
+        .generate_evm_verifier_unrolled_sharded_artifacts()
+        .expect("failed to generate unrolled-sharded verifier artifacts");
+    let sharded_dispatcher_runtime_bytes = unrolled_sharded.dispatcher_runtime_code.len();
+    let sharded_dispatcher_initcode_bytes = unrolled_sharded.dispatcher_deployment_code.len();
+    let sharded_shard_runtime_sizes =
+        unrolled_sharded.shard_runtime_codes.iter().map(|code| code.len()).collect::<Vec<_>>();
+    let sharded_shard_initcode_sizes =
+        unrolled_sharded.shard_deployment_codes.iter().map(|code| code.len()).collect::<Vec<_>>();
     let calldata = bundle.encode_evm_calldata().expect("failed to encode EVM calldata");
 
     let out_dir = std::env::var_os("MIDNIGHT_EVM_OUT_DIR")
@@ -115,19 +124,74 @@ fn main() {
     let solidity_path = out_dir.join("MidnightPoseidonVerifier.sol");
     let bytecode_path = out_dir.join("midnight_poseidon.bytecode");
     let calldata_path = out_dir.join("midnight_poseidon.calldata");
+    let unrolled_sharded_dispatcher_solidity_path =
+        out_dir.join("MidnightPoseidonVerifierUnrolledShardedDispatcher.sol");
+    let unrolled_sharded_dispatcher_runtime_path =
+        out_dir.join("midnight_poseidon_unrolled_sharded_dispatcher.bytecode");
+    let unrolled_sharded_shards_path =
+        out_dir.join("midnight_poseidon_unrolled_sharded_shards.bytecode");
+    let unrolled_sharded_manifest_path =
+        out_dir.join("midnight_poseidon_unrolled_sharded_manifest.txt");
     let bench_summary_path = out_dir.join("midnight_poseidon_bench.json");
 
     std::fs::write(&solidity_path, &solidity).expect("failed to write Solidity verifier");
     std::fs::write(&bytecode_path, format!("0x{}", hex::encode(&bytecode)))
         .expect("failed to write verifier bytecode");
     std::fs::write(&calldata_path, hex::encode(&calldata)).expect("failed to write calldata");
+    std::fs::write(
+        &unrolled_sharded_dispatcher_solidity_path,
+        &unrolled_sharded.dispatcher_solidity,
+    )
+    .expect("failed to write unrolled-sharded dispatcher Solidity");
+    std::fs::write(
+        &unrolled_sharded_dispatcher_runtime_path,
+        format!("0x{}", hex::encode(&unrolled_sharded.dispatcher_deployment_code)),
+    )
+    .expect("failed to write unrolled-sharded dispatcher deployment bytecode");
+    let unrolled_sharded_shards_lines = unrolled_sharded
+        .shard_deployment_codes
+        .iter()
+        .enumerate()
+        .map(|(idx, code)| format!("shard[{idx}] = 0x{}", hex::encode(code)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&unrolled_sharded_shards_path, unrolled_sharded_shards_lines)
+        .expect("failed to write unrolled-sharded shard deployment bytecodes");
+    let unrolled_sharded_manifest = format!(
+        "runtime_code_size_limit_bytes: {}\ninitcode_size_limit_bytes: {}\ntotal_statements: {}\nshard_statement_start_indices: {:?}\nshard_statement_end_indices: {:?}\ndispatcher_runtime_code_bytes: {}\ndispatcher_deployment_code_bytes: {}\nshard_runtime_code_bytes: {:?}\nshard_deployment_code_bytes: {:?}\n",
+        unrolled_sharded.manifest.runtime_code_size_limit_bytes,
+        unrolled_sharded.manifest.initcode_size_limit_bytes,
+        unrolled_sharded.manifest.total_statements,
+        unrolled_sharded.manifest.shard_statement_start_indices,
+        unrolled_sharded.manifest.shard_statement_end_indices,
+        unrolled_sharded.manifest.dispatcher_runtime_code_bytes,
+        unrolled_sharded.manifest.dispatcher_deployment_code_bytes,
+        unrolled_sharded.manifest.shard_runtime_code_bytes,
+        unrolled_sharded.manifest.shard_deployment_code_bytes,
+    );
+    std::fs::write(&unrolled_sharded_manifest_path, unrolled_sharded_manifest)
+        .expect("failed to write unrolled-sharded manifest");
+    for (idx, shard_solidity) in unrolled_sharded.shard_solidity_sources.iter().enumerate() {
+        let shard_path =
+            out_dir.join(format!("MidnightPoseidonVerifierUnrolledShardedShard{idx}.sol"));
+        std::fs::write(shard_path, shard_solidity)
+            .expect("failed to write unrolled-sharded shard Solidity");
+    }
 
     println!("proof bytes: {}", proof.len());
     println!("deployment code bytes: {}", bytecode.len());
+    println!("unrolled-sharded dispatcher runtime bytes: {}", sharded_dispatcher_runtime_bytes);
+    println!("unrolled-sharded dispatcher initcode bytes: {}", sharded_dispatcher_initcode_bytes);
+    println!("unrolled-sharded shard runtime sizes (bytes): {:?}", sharded_shard_runtime_sizes);
+    println!("unrolled-sharded shard initcode sizes (bytes): {:?}", sharded_shard_initcode_sizes);
     println!("calldata bytes: {}", calldata.len());
     println!("wrote {}", solidity_path.display());
     println!("wrote {}", bytecode_path.display());
     println!("wrote {}", calldata_path.display());
+    println!("wrote {}", unrolled_sharded_dispatcher_solidity_path.display());
+    println!("wrote {}", unrolled_sharded_dispatcher_runtime_path.display());
+    println!("wrote {}", unrolled_sharded_shards_path.display());
+    println!("wrote {}", unrolled_sharded_manifest_path.display());
 
     // Compressed-proof variant (`[sign || x]` per G1 point).
     let proof_compressed = midnight_zk_stdlib::prove::<PoseidonExample, MidnightEvmHashCompressed>(
@@ -197,6 +261,15 @@ fn main() {
         "call_gas": null,
         "error": null
     });
+    let mut revm_unrolled_sharded = json!({
+        "status": "skipped",
+        "deployment_gas": null,
+        "shard_deploy_gas": null,
+        "dispatcher_deploy_gas": null,
+        "call_gas": null,
+        "total_gas": null,
+        "error": null
+    });
 
     #[cfg(feature = "revm")]
     {
@@ -229,6 +302,43 @@ fn main() {
                     revm_compressed = json!({
                         "status": "error",
                         "call_gas": null,
+                        "error": err.to_string()
+                    });
+                }
+            }
+
+            match bundle.verify_with_generated_solidity_revm_unrolled_sharded_with_metrics() {
+                Ok(metrics) => {
+                    println!(
+                        "revm unrolled-sharded deployment gas: shards={} dispatcher={} total={}",
+                        metrics.shard_deploy_gas,
+                        metrics.dispatcher_deploy_gas,
+                        metrics.deployment_gas()
+                    );
+                    println!("revm gas (unrolled-sharded): {}", metrics.call_gas);
+                    println!(
+                        "revm gas delta (unrolled-sharded - uncompressed): {}",
+                        metrics.call_gas as i64 - gas as i64
+                    );
+                    revm_unrolled_sharded = json!({
+                        "status": "ok",
+                        "deployment_gas": metrics.deployment_gas(),
+                        "shard_deploy_gas": metrics.shard_deploy_gas,
+                        "dispatcher_deploy_gas": metrics.dispatcher_deploy_gas,
+                        "call_gas": metrics.call_gas,
+                        "total_gas": metrics.total_gas(),
+                        "error": null
+                    });
+                }
+                Err(err) => {
+                    println!("revm unrolled-sharded verification failed: {err}");
+                    revm_unrolled_sharded = json!({
+                        "status": "error",
+                        "deployment_gas": null,
+                        "shard_deploy_gas": null,
+                        "dispatcher_deploy_gas": null,
+                        "call_gas": null,
+                        "total_gas": null,
                         "error": err.to_string()
                     });
                 }
@@ -266,9 +376,20 @@ fn main() {
             "proof_byte_delta": proof_compressed.len() as i64 - proof.len() as i64,
             "calldata_byte_delta": calldata_compressed.len() as i64 - calldata.len() as i64
         },
+        "unrolled_sharded": {
+            "dispatcher_runtime_code_bytes": sharded_dispatcher_runtime_bytes,
+            "dispatcher_initcode_bytes": sharded_dispatcher_initcode_bytes,
+            "shard_count": sharded_shard_runtime_sizes.len(),
+            "shard_runtime_sizes_bytes": sharded_shard_runtime_sizes,
+            "shard_initcode_sizes_bytes": sharded_shard_initcode_sizes,
+            "statement_count": unrolled_sharded.manifest.total_statements,
+            "shard_statement_start_indices": unrolled_sharded.manifest.shard_statement_start_indices,
+            "shard_statement_end_indices": unrolled_sharded.manifest.shard_statement_end_indices
+        },
         "revm": {
             "uncompressed": revm_uncompressed,
             "compressed": revm_compressed,
+            "unrolled_sharded": revm_unrolled_sharded,
             "call_gas_delta_compressed_minus_uncompressed": call_gas_delta,
             "preferred_variant": preferred_variant
         }

@@ -99,12 +99,7 @@ fn unrolled_shard_contract_name(index: usize) -> String {
     format!("Halo2VerifierShard{index}")
 }
 
-fn build_unrolled_shard_solidity(
-    contract_name: &str,
-    scalar_modulus: U256,
-    success_slot: usize,
-    body: &str,
-) -> String {
+fn build_unrolled_shard_solidity(contract_name: &str, scalar_modulus: U256, body: &str) -> String {
     format!(
         r#"
 // SPDX-License-Identifier: MIT
@@ -119,11 +114,11 @@ contract {contract_name} {{
                 revert(0, 0)
             }}
 
-            let success := mload({success_slot:#x})
+            let success := 1
             let f_q := {scalar_modulus}
 {body}
-            mstore({success_slot:#x}, success)
-            return(0, 0)
+            mstore(0x00, success)
+            return(0x00, 0x20)
         }}
     }}
 }}
@@ -132,7 +127,7 @@ contract {contract_name} {{
     )
 }
 
-fn build_unrolled_dispatcher_solidity(success_slot: usize) -> String {
+fn build_unrolled_dispatcher_solidity() -> String {
     // `shards` is the first state variable and occupies storage slot 0.
     // Dynamic-array element base slot is `keccak256(abi.encode(slot))`.
     format!(
@@ -155,27 +150,32 @@ contract Halo2VerifierDispatcher {{
                 revert(0, 0)
             }}
 
-            mstore({success_slot:#x}, 1)
+            let calldata_ptr := 0x80
+            let calldata_len := calldatasize()
+            calldatacopy(calldata_ptr, 0, calldata_len)
 
             let len := sload(0)
             mstore(0x00, 0)
             let base := keccak256(0x00, 0x20)
 
             for {{ let i := 0 }} lt(i, len) {{ i := add(i, 1) }} {{
-                mstore(0x40, 0x80)
                 let shard := and(
                     sload(add(base, i)),
                     0x000000000000000000000000ffffffffffffffffffffffffffffffffffffffff
                 )
-                if iszero(delegatecall(gas(), shard, 0, calldatasize(), 0, 0)) {{
+                if iszero(delegatecall(gas(), shard, calldata_ptr, calldata_len, 0, 0)) {{
                     returndatacopy(0, 0, returndatasize())
                     revert(0, returndatasize())
                 }}
+                if iszero(eq(returndatasize(), 0x20)) {{
+                    revert(0, 0)
+                }}
+                returndatacopy(0, 0, 0x20)
+                if iszero(mload(0)) {{
+                    revert(0, 0)
+                }}
             }}
 
-            if iszero(mload({success_slot:#x})) {{
-                revert(0, 0)
-            }}
             return(0, 0)
         }}
     }}
@@ -353,7 +353,6 @@ impl EvmLoader {
             "unrolled-sharded verifier generation requires at least one emitted statement block"
         );
 
-        let success_slot = self.ptr() + 0x20;
         let total_statements = statement_blocks.len();
 
         // Build initial grouped ranges to keep compile-search tractable.
@@ -375,7 +374,6 @@ impl EvmLoader {
                 let shard_solidity = build_unrolled_shard_solidity(
                     "Halo2VerifierShardCandidate",
                     self.scalar_modulus,
-                    success_slot,
                     &body,
                 );
                 let Some((deployment, runtime)) = try_compile_solidity_sizes(&shard_solidity)
@@ -431,7 +429,6 @@ impl EvmLoader {
                 let shard_solidity = build_unrolled_shard_solidity(
                     "Halo2VerifierShardCandidate",
                     self.scalar_modulus,
-                    success_slot,
                     &body,
                 );
                 let fits = try_compile_solidity_sizes(&shard_solidity)
@@ -462,12 +459,8 @@ impl EvmLoader {
         for (idx, range) in shards.iter().enumerate() {
             let body = join_statement_blocks(&statement_blocks, range.start, range.end);
             let contract_name = unrolled_shard_contract_name(idx);
-            let solidity = build_unrolled_shard_solidity(
-                &contract_name,
-                self.scalar_modulus,
-                success_slot,
-                &body,
-            );
+            let solidity =
+                build_unrolled_shard_solidity(&contract_name, self.scalar_modulus, &body);
             let (deployment_code, runtime_code) = try_compile_solidity_sizes(&solidity).unwrap_or_else(|| {
                 panic!(
                     "failed to compile finalized unrolled-sharded contract {contract_name} for statement range [{}..{})",
@@ -494,7 +487,7 @@ impl EvmLoader {
             shard_statement_end_indices.push(range.end);
         }
 
-        let dispatcher_solidity = build_unrolled_dispatcher_solidity(success_slot);
+        let dispatcher_solidity = build_unrolled_dispatcher_solidity();
         let (dispatcher_deployment_code, dispatcher_runtime_code) =
             try_compile_solidity_sizes(&dispatcher_solidity)
                 .expect("failed to compile unrolled-sharded dispatcher Solidity");
