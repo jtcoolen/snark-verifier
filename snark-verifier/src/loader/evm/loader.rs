@@ -1,8 +1,12 @@
 use crate::{
     loader::{
         evm::{
-            code::{Precompiled, SolidityAssemblyCode},
-            fe_to_u256, modulus, u256_to_fe, U256, U512,
+            code::{
+                Precompiled, SolidityAssemblyCode, UnrolledShardedProgramManifest,
+                UnrolledShardedVerifierArtifacts,
+            },
+            compile_solidity, compile_solidity_runtime, fe_to_u256, modulus, u256_to_fe, U256,
+            U512,
         },
         EcPointLoader, LoadedEcPoint, LoadedScalar, Loader, ScalarLoader,
     },
@@ -13,11 +17,12 @@ use crate::{
 };
 use hex;
 use std::{
-    cell::RefCell,
+    cell::{RefCell, RefMut},
     collections::HashMap,
     fmt::{self, Debug},
     iter,
-    ops::{Add, AddAssign, DerefMut, Mul, MulAssign, Neg, Sub, SubAssign},
+    ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
+    panic::{catch_unwind, AssertUnwindSafe},
     rc::Rc,
 };
 
@@ -26,6 +31,32 @@ pub const MEM_PTR_START: usize = 0x80;
 const BLS_ENCODED_FP_BYTES: usize = 0x40;
 const BLS_G1_BYTES: usize = 2 * BLS_ENCODED_FP_BYTES;
 const BLS_G2_BYTES: usize = 4 * BLS_ENCODED_FP_BYTES;
+const EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES: usize = 24_576;
+const EVM_INITCODE_SIZE_LIMIT_BYTES: usize = 49_152;
+const SHARDED_INITIAL_GROUP_SIZE: usize = 64;
+
+/// Half-open index range `[start, end)` over emitted runtime statement blocks.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ShardStatementRange {
+    start: usize,
+    end: usize,
+}
+
+impl ShardStatementRange {
+    /// Returns the number of statements covered by this half-open range.
+    fn len(self) -> usize {
+        self.end - self.start
+    }
+
+    /// Splits the range into two contiguous halves.
+    ///
+    /// Panics when called for a single-statement range.
+    fn bisect(self) -> (Self, Self) {
+        assert!(self.len() > 1, "cannot bisect a single-statement range");
+        let mid = self.start + self.len() / 2;
+        (Self { start: self.start, end: mid }, Self { start: mid, end: self.end })
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum Value<T> {
@@ -68,19 +99,124 @@ fn hex_encode_u256(value: &U256) -> String {
     format!("0x{}", hex::encode(value.to_be_bytes::<32>()))
 }
 
-fn be_bytes_to_u256(bytes: &[u8]) -> U256 {
-    let word: [u8; 32] = bytes.try_into().expect("word must be 32 bytes");
-    U256::from_be_bytes(word)
+/// Returns deterministic shard contract names (`Halo2VerifierShard{index}`).
+fn unrolled_shard_contract_name(index: usize) -> String {
+    format!("Halo2VerifierShard{index}")
 }
 
+/// Wraps a shard runtime-body snippet in a full deployable Solidity contract.
+fn build_unrolled_shard_solidity(contract_name: &str, scalar_modulus: U256, body: &str) -> String {
+    format!(
+        r#"
+// SPDX-License-Identifier: MIT
+
+pragma solidity 0.8.30;
+
+contract {contract_name} {{
+    fallback(bytes calldata) external returns (bytes memory) {{
+        assembly ("memory-safe") {{
+            let data := mload(0x40)
+            if iszero(eq(data, 0x80)) {{
+                revert(0, 0)
+            }}
+
+            let success := 1
+            let f_q := {scalar_modulus}
+{body}
+            mstore(0x00, success)
+            return(0x00, 0x20)
+        }}
+    }}
+}}
+"#,
+        scalar_modulus = hex_encode_u256(&scalar_modulus),
+    )
+}
+
+/// Builds the fixed dispatcher contract that delegate-calls each verifier shard.
+fn build_unrolled_dispatcher_solidity() -> String {
+    // `shards` is the first state variable and occupies storage slot 0.
+    // Dynamic-array element base slot is `keccak256(abi.encode(slot))`.
+    r#"
+// SPDX-License-Identifier: MIT
+
+pragma solidity 0.8.30;
+
+contract Halo2VerifierDispatcher {
+    address[] private shards;
+
+    constructor(address[] memory _shards) {
+        shards = _shards;
+    }
+
+    fallback(bytes calldata) external returns (bytes memory) {
+        assembly ("memory-safe") {
+            let data := mload(0x40)
+            if iszero(eq(data, 0x80)) {
+                revert(0, 0)
+            }
+
+            let calldata_ptr := 0x80
+            let calldata_len := calldatasize()
+            calldatacopy(calldata_ptr, 0, calldata_len)
+
+            let len := sload(0)
+            mstore(0x00, 0)
+            let base := keccak256(0x00, 0x20)
+
+            for { let i := 0 } lt(i, len) { i := add(i, 1) } {
+                let shard := and(
+                    sload(add(base, i)),
+                    0x000000000000000000000000ffffffffffffffffffffffffffffffffffffffff
+                )
+                if iszero(delegatecall(gas(), shard, calldata_ptr, calldata_len, 0, 0)) {
+                    returndatacopy(0, 0, returndatasize())
+                    revert(0, returndatasize())
+                }
+                if iszero(eq(returndatasize(), 0x20)) {
+                    revert(0, 0)
+                }
+                returndatacopy(0, 0, 0x20)
+                if iszero(mload(0)) {
+                    revert(0, 0)
+                }
+            }
+            return(0, 0)
+        }
+    }
+}
+"#
+    .to_string()
+}
+
+/// Best-effort compiles Solidity source into deployment/runtime bytecode.
+///
+/// Returns `None` when either compile panics.
+fn try_compile_solidity_sizes(solidity: &str) -> Option<(Vec<u8>, Vec<u8>)> {
+    let deployment = catch_unwind(AssertUnwindSafe(|| compile_solidity(solidity))).ok()?;
+    let runtime = catch_unwind(AssertUnwindSafe(|| compile_solidity_runtime(solidity))).ok()?;
+    Some((deployment, runtime))
+}
+
+/// Concatenates a statement-block sub-range with newlines.
+fn join_statement_blocks(blocks: &[String], start: usize, end: usize) -> String {
+    blocks[start..end].iter().map(String::as_str).join("\n")
+}
+
+/// Returns whether compiled deployment/runtime bytecode sizes satisfy EIP-3860 and EIP-170.
+fn fits_evm_code_size_limits(deployment: &[u8], runtime: &[u8]) -> bool {
+    runtime.len() <= EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES
+        && deployment.len() <= EVM_INITCODE_SIZE_LIMIT_BYTES
+}
+
+/// Decodes little-endian bytes into two padded big-endian 256-bit words.
 fn le_bytes_to_padded_be_words(bytes_le: &[u8]) -> [U256; 2] {
     assert!(bytes_le.len() <= BLS_ENCODED_FP_BYTES);
     let mut padded = [0u8; BLS_ENCODED_FP_BYTES];
-    // Field elements come in little-endian; precompile ABI expects big-endian words.
     let be = bytes_le.iter().rev().copied().collect_vec();
     let offset = BLS_ENCODED_FP_BYTES - be.len();
     padded[offset..].copy_from_slice(&be);
-    [be_bytes_to_u256(&padded[..0x20]), be_bytes_to_u256(&padded[0x20..BLS_ENCODED_FP_BYTES])]
+    [U256::from_be_slice(&padded[..0x20]), U256::from_be_slice(&padded[0x20..BLS_ENCODED_FP_BYTES])]
 }
 
 impl EvmLoader {
@@ -112,14 +248,222 @@ impl EvmLoader {
     /// In other words, it's basically just assembly (equivalently, Yul).
     pub fn solidity_code(self: &Rc<Self>) -> String {
         let code = "
-            // Revert if anything fails
-            if iszero(success) { revert(0, 0) }
+                    // Revert if anything fails
+                    if iszero(success) { revert(0, 0) }
 
-            // Return empty bytes on success
-            return(0, 0)"
+                    // Return empty bytes on success
+                    return(0, 0)"
             .to_string();
         self.code.borrow_mut().runtime_append(code);
         self.code.borrow().code(hex_encode_u256(&self.scalar_modulus))
+    }
+
+    /// Returns a mutable handle to the underlying assembly code buffer.
+    pub fn code_mut(&self) -> RefMut<'_, SolidityAssemblyCode> {
+        self.code.borrow_mut()
+    }
+
+    /// Compiles one shard candidate for a statement range and returns Solidity + bytecode.
+    fn compile_shard_candidate(
+        &self,
+        statement_blocks: &[String],
+        contract_name: &str,
+        range: ShardStatementRange,
+    ) -> (String, Option<(Vec<u8>, Vec<u8>)>) {
+        let body = join_statement_blocks(statement_blocks, range.start, range.end);
+        let solidity = build_unrolled_shard_solidity(contract_name, self.scalar_modulus, &body);
+        let artifacts = try_compile_solidity_sizes(&solidity);
+        (solidity, artifacts)
+    }
+
+    /// Ensures `grouped_ranges[cursor]` is compilable and within code-size limits.
+    ///
+    /// If the current range fails, it is bisected in-place and retried until it fits
+    /// or until a single-statement range proves irreducible.
+    fn ensure_grouped_range_fits(
+        &self,
+        statement_blocks: &[String],
+        grouped_ranges: &mut Vec<ShardStatementRange>,
+        cursor: usize,
+    ) {
+        loop {
+            let range = grouped_ranges[cursor];
+            let (_, artifacts) = self.compile_shard_candidate(
+                statement_blocks,
+                "Halo2VerifierShardCandidate",
+                range,
+            );
+            match artifacts {
+                Some((deployment, runtime)) if fits_evm_code_size_limits(&deployment, &runtime) => {
+                    return;
+                }
+                Some((deployment, runtime)) if range.len() <= 1 => {
+                    panic!(
+                        "single statement range [{}..{}) exceeds EVM limits: runtime={} initcode={}",
+                        range.start,
+                        range.end,
+                        runtime.len(),
+                        deployment.len()
+                    );
+                }
+                None if range.len() <= 1 => {
+                    panic!(
+                        "failed to compile unrolled-sharded candidate for statement range [{}..{})",
+                        range.start, range.end
+                    );
+                }
+                _ => {
+                    let (left, right) = range.bisect();
+                    grouped_ranges.splice(cursor..=cursor, [left, right]);
+                }
+            }
+        }
+    }
+
+    /// Finds the largest contiguous grouped-range prefix starting at `cursor` that still fits.
+    fn find_largest_fitting_group_end(
+        &self,
+        statement_blocks: &[String],
+        grouped_ranges: &[ShardStatementRange],
+        cursor: usize,
+    ) -> usize {
+        let mut lo = cursor + 1;
+        let mut hi = grouped_ranges.len() + 1;
+        while lo + 1 < hi {
+            let mid = (lo + hi) / 2;
+            let range = ShardStatementRange {
+                start: grouped_ranges[cursor].start,
+                end: grouped_ranges[mid - 1].end,
+            };
+            let (_, artifacts) = self.compile_shard_candidate(
+                statement_blocks,
+                "Halo2VerifierShardCandidate",
+                range,
+            );
+            let fits = artifacts
+                .as_ref()
+                .map(|(deployment, runtime)| fits_evm_code_size_limits(deployment, runtime))
+                .unwrap_or(false);
+            if fits {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        lo
+    }
+
+    /// Creates compiled shard Solidity/runtime artifacts from final statement ranges.
+    fn build_shard_artifacts(
+        &self,
+        statement_blocks: &[String],
+        shards: &[ShardStatementRange],
+    ) -> (Vec<String>, Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<usize>, Vec<usize>) {
+        shards
+            .iter()
+            .enumerate()
+            .map(|(idx, &range)| {
+                let contract_name = unrolled_shard_contract_name(idx);
+                let (solidity, artifacts) =
+                    self.compile_shard_candidate(statement_blocks, &contract_name, range);
+                let (deployment_code, runtime_code) = artifacts.unwrap_or_else(|| {
+                    panic!(
+                        "failed to compile finalized unrolled-sharded contract {contract_name} for statement range [{}..{})",
+                        range.start, range.end
+                    )
+                });
+                assert!(
+                    fits_evm_code_size_limits(&deployment_code, &runtime_code),
+                    "unrolled-sharded shard exceeds EVM limits: runtime={} initcode={}",
+                    runtime_code.len(),
+                    deployment_code.len()
+                );
+                (solidity, deployment_code, runtime_code, range.start, range.end)
+            })
+            .multiunzip()
+    }
+
+    /// Returns unrolled-sharded verifier dispatcher plus shard artifacts.
+    ///
+    /// Strategy:
+    /// 1. Split emitted runtime statements into coarse groups.
+    /// 2. Recursively bisect non-fitting groups until each group is individually deployable.
+    /// 3. Binary-search the largest contiguous group window that still fits each shard.
+    /// 4. Compile finalized shard contracts and dispatcher and return all artifacts.
+    pub fn unrolled_sharded_verifier_artifacts(&self) -> UnrolledShardedVerifierArtifacts {
+        let statement_blocks = self.code.borrow().runtime_blocks().to_vec();
+        assert!(
+            !statement_blocks.is_empty(),
+            "unrolled-sharded verifier generation requires at least one emitted statement block"
+        );
+
+        let total_statements = statement_blocks.len();
+
+        // Start with coarse blocks, then refine only where needed.
+        let mut grouped_ranges = (0..total_statements)
+            .step_by(SHARDED_INITIAL_GROUP_SIZE)
+            .map(|start| ShardStatementRange {
+                start,
+                end: (start + SHARDED_INITIAL_GROUP_SIZE).min(total_statements),
+            })
+            .collect_vec();
+
+        let mut cursor = 0usize;
+        let shards = iter::from_fn(|| {
+            (cursor < grouped_ranges.len()).then(|| {
+                self.ensure_grouped_range_fits(&statement_blocks, &mut grouped_ranges, cursor);
+                let end_group =
+                    self.find_largest_fitting_group_end(&statement_blocks, &grouped_ranges, cursor);
+                let shard = ShardStatementRange {
+                    start: grouped_ranges[cursor].start,
+                    end: grouped_ranges[end_group - 1].end,
+                };
+                cursor = end_group;
+                shard
+            })
+        })
+        .collect_vec();
+
+        let (
+            shard_solidity_sources,
+            shard_deployment_codes,
+            shard_runtime_codes,
+            shard_statement_start_indices,
+            shard_statement_end_indices,
+        ) = self.build_shard_artifacts(&statement_blocks, &shards);
+
+        let dispatcher_solidity = build_unrolled_dispatcher_solidity();
+        let (dispatcher_deployment_code, dispatcher_runtime_code) =
+            try_compile_solidity_sizes(&dispatcher_solidity)
+                .expect("failed to compile unrolled-sharded dispatcher Solidity");
+        assert!(
+            fits_evm_code_size_limits(&dispatcher_deployment_code, &dispatcher_runtime_code),
+            "unrolled-sharded dispatcher exceeds EVM limits: runtime={} initcode={}",
+            dispatcher_runtime_code.len(),
+            dispatcher_deployment_code.len()
+        );
+
+        let manifest = UnrolledShardedProgramManifest {
+            runtime_code_size_limit_bytes: EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES,
+            initcode_size_limit_bytes: EVM_INITCODE_SIZE_LIMIT_BYTES,
+            total_statements,
+            shard_statement_start_indices,
+            shard_statement_end_indices,
+            dispatcher_runtime_code_bytes: dispatcher_runtime_code.len(),
+            dispatcher_deployment_code_bytes: dispatcher_deployment_code.len(),
+            shard_runtime_code_bytes: shard_runtime_codes.iter().map(Vec::len).collect(),
+            shard_deployment_code_bytes: shard_deployment_codes.iter().map(Vec::len).collect(),
+        };
+
+        UnrolledShardedVerifierArtifacts {
+            dispatcher_solidity,
+            dispatcher_deployment_code,
+            dispatcher_runtime_code,
+            shard_solidity_sources,
+            shard_deployment_codes,
+            shard_runtime_codes,
+            manifest,
+        }
     }
 
     /// Allocates memory chunk with given `size` and returns pointer.

@@ -4,6 +4,7 @@ mod code;
 pub(crate) mod loader;
 pub(crate) mod util;
 
+pub use code::{UnrolledShardedProgramManifest, UnrolledShardedVerifierArtifacts};
 pub use loader::{EcPoint, EvmLoader, Scalar};
 #[cfg(feature = "revm")]
 pub use util::deploy_and_call;
