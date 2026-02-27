@@ -7,7 +7,7 @@ use halo2_base::halo2_proofs::halo2curves::bls12_381::{
 use itertools::Itertools;
 use snark_verifier::{
     loader::{
-        evm::{compile_solidity, encode_calldata, EvmLoader},
+        evm::{compile_solidity, encode_calldata, EvmLoader, UnrolledShardedVerifierArtifacts},
         EcPointLoader,
     },
     system::halo2::transcript::evm::EvmTranscript,
@@ -32,6 +32,14 @@ impl MidnightProofBundle {
         Ok(compile_solidity(&solidity))
     }
 
+    /// Generate unrolled-sharded verifier dispatcher + shard artifacts.
+    pub fn generate_evm_verifier_unrolled_sharded_artifacts(
+        &self,
+    ) -> Result<UnrolledShardedVerifierArtifacts> {
+        let loader = self.build_evm_verifier_loader()?;
+        Ok(loader.unrolled_sharded_verifier_artifacts())
+    }
+
     /// Encode calldata expected by the generated Solidity verifier.
     ///
     /// The proof bytes must be produced in Midnight EVM transcript mode.
@@ -49,6 +57,21 @@ impl MidnightProofBundle {
         let calldata = self.encode_evm_calldata()?;
         snark_verifier::loader::evm::deploy_and_call(bytecode, calldata)
             .map_err(|err| anyhow!("revm deployment/call failed: {err}"))
+    }
+
+    /// Deploy and call unrolled-sharded verifier/runtime shards in local revm.
+    ///
+    /// Returns gas used by the verification call.
+    #[cfg(feature = "revm")]
+    pub fn verify_with_generated_solidity_revm_unrolled_sharded(&self) -> Result<u64> {
+        let sharded = self.generate_evm_verifier_unrolled_sharded_artifacts()?;
+        let calldata = self.encode_evm_calldata()?;
+        snark_verifier::loader::evm::deploy_unrolled_sharded_and_call(
+            sharded.shard_deployment_codes,
+            sharded.dispatcher_deployment_code,
+            calldata,
+        )
+        .map_err(|err| anyhow!("revm unrolled-sharded deployment/call failed: {err}"))
     }
 
     // Build an EVM loader by replaying proof parsing/verification over EVM transcript semantics.
