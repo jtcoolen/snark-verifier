@@ -790,8 +790,8 @@ impl EvmLoader {
             self.dup_scalar(scalar);
         }
         let rd_ptr = self.allocate(BLS_G1_BYTES);
-        self.staticcall_with_lengths(
-            Precompiled::Bls12_381G1Msm,
+        self.staticcall_sized(
+            Precompiled::Bls12_381G1Msm as usize,
             cd_ptr,
             cd_len,
             rd_ptr,
