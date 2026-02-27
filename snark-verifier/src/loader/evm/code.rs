@@ -1,9 +1,6 @@
 pub enum Precompiled {
     BigModExp = 0x05,
     // EIP-2537 (Prague): BLS12-381 precompile addresses.
-    // Kept for fallback/single-op paths even when MSM batching is preferred.
-    #[allow(dead_code)]
-    Bls12_381G1Add = 0x0b,
     Bls12_381G1Msm = 0x0c,
     Bls12_381Pairing = 0x0f,
 }
