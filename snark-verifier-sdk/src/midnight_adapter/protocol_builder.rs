@@ -1,11 +1,32 @@
-//! [`halo2_proofs`](crate::halo2_proofs) proof system
+//! Midnight-to-`snark-verifier` protocol adapter.
+//!
+//! Midnight proofs do not map 1:1 onto vanilla Halo2 protocol metadata. In
+//! particular, Midnight extends transcript and layout semantics with:
+//! - committed-instance prefixes,
+//! - hashed instance lengths,
+//! - trash columns/constraints,
+//! - a `z^n / z` quotient chunk base and fixed quotient chunk count.
+//!
+//! [`MidnightProtocolBuilder`] translates a Midnight verifying key and
+//! constraint system into a [`snark_verifier::verifier::plonk::PlonkProtocol`]
+//! that preserves those semantics exactly, so the generic verifier and EVM
+//! codegen paths parse/query commitments in the same order as Midnight's prover.
+//!
+//! The builder is intentionally strict: it validates instance-shape assumptions
+//! up front to fail fast on layout mismatches.
 
-use crate::halo2_proofs::{
-    plonk::{self, Any, ConstraintSystem, FirstPhase, SecondPhase, ThirdPhase, VerifyingKey},
-    poly::{self, commitment::Params},
-    transcript::{EncodedChallenge, Transcript},
+use anyhow::{bail, Result};
+use halo2_base::halo2_proofs::halo2curves::{
+    bls12_381::{Fr as HaloFr, G1Affine as HaloG1Affine},
+    ff::{Field, PrimeField},
 };
-use crate::{
+use itertools::Itertools;
+use midnight_curves::{Bls12, Fq};
+use midnight_proofs::plonk::{
+    Any, Expression as MidnightExpression, FirstPhase, SecondPhase, ThirdPhase, VerifyingKey,
+};
+use midnight_proofs::poly::kzg::KZGCommitmentScheme;
+use snark_verifier::{
     system::halo2::{
         expression::{
             distribute_powers as halo2_distribute_powers, l_active as halo2_l_active,
@@ -13,251 +34,230 @@ use crate::{
         },
         layout::{permutation_chunk_count, remap_by_phase},
     },
-    util::{
-        arithmetic::{root_of_unity, CurveAffine, Domain, PrimeField, Rotation},
-        Itertools,
-    },
-    verifier::plonk::protocol::{
-        CommonPolynomial, Expression, InstanceCommittingKey, PlonkProtocol, Query,
-        QuotientPolynomial,
+    util::arithmetic::{Domain, Rotation},
+    verifier::plonk::{
+        CommonPolynomial, Expression, PlonkProtocol, Query, QuotientChunkBase, QuotientPolynomial,
     },
 };
-use std::{io, iter, mem::size_of};
 
-pub mod expression;
-pub mod layout;
-pub mod strategy;
-pub mod transcript;
+use super::conversions::{midnight_fq_to_halo_fr, midnight_g1_to_halo_affine};
 
-/// Configuration for converting a [`VerifyingKey`] of [`halo2_proofs`](crate::halo2_proofs) into
-/// [`PlonkProtocol`].
-#[derive(Clone, Debug, Default)]
-pub struct Config {
-    zk: bool,
-    query_instance: bool,
-    num_proof: usize,
+/// Builds a `snark-verifier` PLONK protocol that mirrors Midnight layout rules.
+///
+/// This struct precomputes indexing/offset metadata so every generated query
+/// lands on the same polynomial position Midnight expects during proof parsing.
+/// The resulting protocol is consumed by:
+/// - native proof parsing/verification paths, and
+/// - EVM verifier generation (which replays the same query ordering).
+#[derive(Clone, Debug)]
+pub(super) struct MidnightProtocolBuilder<'a> {
+    vk: &'a VerifyingKey<Fq, KZGCommitmentScheme<Bls12>>,
+    cs: &'a midnight_proofs::plonk::ConstraintSystem<Fq>,
     num_instance: Vec<usize>,
-    accumulator_indices: Option<Vec<(usize, usize)>>,
-}
-
-impl Config {
-    /// Returns [`Config`] with `query_instance` set to `false`.
-    pub fn kzg() -> Self {
-        Self { zk: true, query_instance: false, num_proof: 1, ..Default::default() }
-    }
-
-    /// Returns [`Config`] with `query_instance` set to `true`.
-    pub fn ipa() -> Self {
-        Self { zk: true, query_instance: true, num_proof: 1, ..Default::default() }
-    }
-
-    /// Set `zk`
-    pub fn set_zk(mut self, zk: bool) -> Self {
-        self.zk = zk;
-        self
-    }
-
-    /// Set `query_instance`
-    pub fn set_query_instance(mut self, query_instance: bool) -> Self {
-        self.query_instance = query_instance;
-        self
-    }
-
-    /// Set `num_proof`
-    pub fn with_num_proof(mut self, num_proof: usize) -> Self {
-        assert!(num_proof > 0);
-        self.num_proof = num_proof;
-        self
-    }
-
-    /// Set `num_instance`
-    pub fn with_num_instance(mut self, num_instance: Vec<usize>) -> Self {
-        self.num_instance = num_instance;
-        self
-    }
-
-    /// Set `accumulator_indices`
-    pub fn with_accumulator_indices(
-        mut self,
-        accumulator_indices: Option<Vec<(usize, usize)>>,
-    ) -> Self {
-        self.accumulator_indices = accumulator_indices;
-        self
-    }
-}
-
-/// Convert a [`VerifyingKey`] of [`halo2_proofs`](crate::halo2_proofs) into [`PlonkProtocol`].
-pub fn compile<'a, C: CurveAffine, P: Params<'a, C>>(
-    params: &P,
-    vk: &VerifyingKey<C>,
-    config: Config,
-) -> PlonkProtocol<C> {
-    assert_eq!(vk.get_domain().k(), params.k());
-
-    let cs = vk.cs();
-    let Config { zk, query_instance, num_proof, num_instance, accumulator_indices } = config;
-
-    let k = params.k() as usize;
-    let domain = Domain::new(k, root_of_unity(k));
-
-    let preprocessed = vk
-        .fixed_commitments()
-        .iter()
-        .chain(vk.permutation().commitments().iter())
-        .cloned()
-        .collect();
-
-    let polynomials = &Polynomials::new(cs, zk, query_instance, num_instance, num_proof);
-
-    let evaluations = iter::empty()
-        .chain((0..num_proof).flat_map(move |t| polynomials.instance_queries(t)))
-        .chain((0..num_proof).flat_map(move |t| polynomials.advice_queries(t)))
-        .chain(polynomials.fixed_queries())
-        .chain(polynomials.random_query())
-        .chain(polynomials.permutation_fixed_queries())
-        .chain((0..num_proof).flat_map(move |t| polynomials.permutation_z_queries::<true>(t)))
-        .chain((0..num_proof).flat_map(move |t| polynomials.lookup_queries::<true>(t)))
-        .collect();
-    // `quotient_query()` is not needed in evaluations because the verifier can compute it itself from the other evaluations.
-    let queries = (0..num_proof)
-        .flat_map(|t| {
-            iter::empty()
-                .chain(polynomials.instance_queries(t))
-                .chain(polynomials.advice_queries(t))
-                .chain(polynomials.permutation_z_queries::<false>(t))
-                .chain(polynomials.lookup_queries::<false>(t))
-        })
-        .chain(polynomials.fixed_queries())
-        .chain(polynomials.permutation_fixed_queries())
-        .chain(iter::once(polynomials.quotient_query()))
-        .chain(polynomials.random_query())
-        .collect();
-
-    let transcript_initial_state = transcript_initial_state::<C>(vk);
-
-    let instance_committing_key = query_instance.then(|| {
-        instance_committing_key(
-            params,
-            polynomials.num_instance().into_iter().max().unwrap_or_default(),
-        )
-    });
-
-    let accumulator_indices = accumulator_indices
-        .map(|accumulator_indices| polynomials.accumulator_indices(accumulator_indices))
-        .unwrap_or_default();
-
-    PlonkProtocol {
-        domain,
-        domain_as_witness: None,
-        preprocessed,
-        num_instance: polynomials.num_instance(),
-        num_witness: polynomials.num_witness(),
-        num_challenge: polynomials.num_challenge(),
-        // Vanilla Halo2 protocols start with no transcript-layout extensions enabled.
-        committed_instance_count: 0,
-        hash_instance_lengths: false,
-        trailing_challenges: 0,
-        extra_commitments: 0,
-        evaluations,
-        queries,
-        quotient: polynomials.quotient(),
-        transcript_initial_state: Some(transcript_initial_state),
-        instance_committing_key,
-        linearization: None,
-        accumulator_indices,
-    }
-}
-
-impl From<poly::Rotation> for Rotation {
-    fn from(rotation: poly::Rotation) -> Rotation {
-        Rotation(rotation.0)
-    }
-}
-
-struct Polynomials<'a, F: PrimeField> {
-    cs: &'a ConstraintSystem<F>,
-    zk: bool,
-    query_instance: bool,
-    num_proof: usize,
-    num_fixed: usize,
-    num_permutation_fixed: usize,
-    num_instance: Vec<usize>,
+    // Number of leading instance columns represented as commitments.
+    committed_instance_count: usize,
     num_advice: Vec<usize>,
     num_challenge: Vec<usize>,
     advice_index: Vec<usize>,
     challenge_index: Vec<usize>,
-    num_lookup_permuted: usize,
+    num_fixed: usize,
+    num_permutation_fixed: usize,
+    num_lookup_z: usize,
+    // Number of trashcan constraints/columns in Midnight layout.
+    num_trash: usize,
     permutation_chunk_size: usize,
     num_permutation_z: usize,
-    num_lookup_z: usize,
 }
 
-impl<'a, F: PrimeField> Polynomials<'a, F> {
-    fn new(
-        cs: &'a ConstraintSystem<F>,
-        zk: bool,
-        query_instance: bool,
+impl<'a> MidnightProtocolBuilder<'a> {
+    /// Collect static layout metadata from Midnight VK/constraint-system.
+    ///
+    /// `num_instance` must include all instance columns (including committed
+    /// placeholder columns). `committed_instance_count` specifies how many
+    /// leading instance columns are represented by commitments instead of raw
+    /// scalar vectors in the transcript.
+    pub(super) fn new(
+        vk: &'a VerifyingKey<Fq, KZGCommitmentScheme<Bls12>>,
         num_instance: Vec<usize>,
-        num_proof: usize,
+        committed_instance_count: usize,
     ) -> Self {
-        // TODO: Re-enable optional-zk when it's merged in pse/halo2.
-        let degree = if zk { cs.degree() } else { unimplemented!() };
-        let permutation_chunk_size = if zk || cs.permutation().get_columns().len() >= degree {
-            degree - 2
-        } else {
-            degree - 1
-        };
+        let cs = vk.cs();
 
         let (num_advice, advice_index) = remap_by_phase(cs.advice_column_phase());
         let (num_challenge, challenge_index) = remap_by_phase(cs.challenge_phase());
-        assert_eq!(num_advice.iter().sum::<usize>(), cs.num_advice_columns());
-        assert_eq!(num_challenge.iter().sum::<usize>(), cs.num_challenges());
+        let num_permutation_fixed = cs.permutation().get_columns().len();
+        let permutation_chunk_size = cs.degree() - 2;
+        let num_permutation_z =
+            permutation_chunk_count(num_permutation_fixed, permutation_chunk_size);
 
         Self {
+            vk,
             cs,
-            zk,
-            query_instance,
-            num_proof,
-            num_fixed: cs.num_fixed_columns(),
-            num_permutation_fixed: cs.permutation().get_columns().len(),
             num_instance,
+            committed_instance_count,
             num_advice,
             num_challenge,
             advice_index,
             challenge_index,
-            num_lookup_permuted: 2 * cs.lookups().len(),
-            permutation_chunk_size,
-            num_permutation_z: permutation_chunk_count(
-                cs.permutation().get_columns().len(),
-                permutation_chunk_size,
-            ),
+            num_fixed: cs.num_fixed_columns(),
+            num_permutation_fixed,
             num_lookup_z: cs.lookups().len(),
+            num_trash: cs.trashcans().len(),
+            permutation_chunk_size,
+            num_permutation_z,
         }
+    }
+
+    /// Build a `PlonkProtocol` with Midnight-specific transcript/layout semantics.
+    ///
+    /// Key guarantees of the produced protocol:
+    /// - query/evaluation ordering matches Midnight transcript parsing order;
+    /// - committed-instance prefix handling is explicit in protocol metadata;
+    /// - trash witness columns and constraints are included in quotient logic;
+    /// - quotient recombination uses `ZnMinusOne` with Midnight's fixed chunk count.
+    pub(super) fn build(&self) -> Result<PlonkProtocol<HaloG1Affine>> {
+        if self.num_instance.len() != self.cs.num_instance_columns() {
+            bail!(
+                "instance column mismatch: protocol has {}, provided {}",
+                self.cs.num_instance_columns(),
+                self.num_instance.len()
+            );
+        }
+        if self.committed_instance_count > self.num_instance.len() {
+            bail!(
+                "committed instance count {} exceeds total instance columns {}",
+                self.committed_instance_count,
+                self.num_instance.len()
+            );
+        }
+        let k = self.vk.get_domain().k() as usize;
+        let gen = midnight_fq_to_halo_fr(self.vk.get_domain().get_omega())?;
+        let domain = Domain::new(k, gen);
+
+        let preprocessed = self
+            .vk
+            .fixed_commitments()
+            .iter()
+            .chain(self.vk.permutation().commitments().iter())
+            .cloned()
+            .map(midnight_g1_to_halo_affine)
+            .collect::<Result<Vec<_>>>()?;
+        // Committed instance columns are queried as commitments; remaining instance columns are scalar vectors.
+        let committed_instance_queries = self.committed_instance_queries();
+        let advice_queries = self.advice_queries()?;
+        let fixed_queries = self.fixed_queries();
+
+        let evaluations = self
+            .committed_instance_queries()
+            .into_iter()
+            .chain(advice_queries.clone())
+            .chain(fixed_queries.clone())
+            .chain(self.random_query())
+            .chain(self.permutation_fixed_queries())
+            .chain(self.permutation_z_queries(true))
+            .chain(self.lookup_queries(true))
+            // Trash witness columns are read/evaluated like regular witness commitments.
+            .chain(self.trash_queries())
+            .collect_vec();
+
+        let queries = committed_instance_queries
+            .into_iter()
+            .chain(advice_queries)
+            .chain(self.permutation_z_queries(false))
+            .chain(self.lookup_queries(false))
+            // Include trash columns in verifier query ordering as well.
+            .chain(self.trash_queries())
+            .chain(fixed_queries)
+            .chain(self.permutation_fixed_queries())
+            .chain(Some(self.quotient_query()))
+            .chain(self.random_query())
+            .collect_vec();
+
+        let quotient = self.quotient()?;
+
+        Ok(PlonkProtocol {
+            domain,
+            domain_as_witness: None,
+            preprocessed,
+            num_instance: self.num_instance.clone(),
+            num_witness: self.num_witness(),
+            num_challenge: self.num_challenge_with_system(),
+            // Enable committed-instance and hashed-instance-length transcript semantics.
+            committed_instance_count: self.committed_instance_count,
+            hash_instance_lengths: true,
+            trailing_challenges: 0,
+            extra_commitments: 0,
+            evaluations,
+            queries,
+            quotient,
+            transcript_initial_state: Some(midnight_fq_to_halo_fr(self.vk.transcript_repr())?),
+            instance_committing_key: None,
+            linearization: None,
+            accumulator_indices: vec![],
+        })
     }
 
     fn num_preprocessed(&self) -> usize {
         self.num_fixed + self.num_permutation_fixed
     }
 
-    fn num_instance(&self) -> Vec<usize> {
-        // Repeat the per-proof instance layout once per proof and flatten into one verifier vector.
-        iter::repeat(self.num_instance.clone()).take(self.num_proof).flatten().collect()
+    fn instance_offset(&self) -> usize {
+        self.num_preprocessed()
+    }
+
+    fn witness_offset(&self) -> usize {
+        self.instance_offset() + self.num_instance.len()
+    }
+
+    fn advice_offset(&self) -> usize {
+        self.witness_offset()
+    }
+
+    fn lookup_permuted_offset(&self) -> usize {
+        self.advice_offset() + self.num_advice.iter().sum::<usize>()
+    }
+
+    fn perm_lookup_offset(&self) -> usize {
+        self.lookup_permuted_offset() + 2 * self.num_lookup_z
+    }
+
+    fn trash_random_offset(&self) -> usize {
+        self.perm_lookup_offset() + self.num_permutation_z + self.num_lookup_z
+    }
+
+    // Random polynomial is placed after all trash witness columns.
+    fn random_poly_index(&self) -> usize {
+        self.trash_random_offset() + self.num_trash
     }
 
     fn num_witness(&self) -> Vec<usize> {
-        iter::empty()
-            .chain(self.num_advice.clone().iter().map(|num| self.num_proof * num))
+        self.num_advice
+            .iter()
+            .copied()
             .chain([
-                self.num_proof * self.num_lookup_permuted,
-                self.num_proof * (self.num_permutation_z + self.num_lookup_z) + self.zk as usize,
+                2 * self.num_lookup_z,
+                self.num_permutation_z + self.num_lookup_z,
+                self.num_trash + 1,
             ])
             .collect()
     }
 
-    fn num_challenge(&self) -> Vec<usize> {
-        let mut num_challenge = self.num_challenge.clone();
-        *num_challenge.last_mut().unwrap() += 1; // theta
-        iter::empty()
+    fn num_challenge_with_system(&self) -> Vec<usize> {
+        let mut phase_challenges = self.num_challenge.clone();
+        *phase_challenges.last_mut().unwrap() += 1; // theta
+                                                    // Add system challenges: beta, gamma, trash_challenge, alpha.
+        phase_challenges.into_iter().chain([2, 1, 1]).collect()
+    }
+
+    fn system_challenge_offset(&self) -> usize {
+        self.num_challenge.iter().sum()
+    }
+
+    fn theta(&self) -> Expression<HaloFr> {
+        Expression::Challenge(self.system_challenge_offset())
+    }
+
+    fn beta(&self) -> Expression<HaloFr> {
             .chain(num_challenge)
             .chain([
                 2, // beta, gamma
