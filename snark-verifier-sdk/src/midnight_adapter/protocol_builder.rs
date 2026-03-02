@@ -538,220 +538,151 @@ impl<'a> MidnightProtocolBuilder<'a> {
                 .zip(zs.iter())
                 .map(|((z, _, _), (_, _, z_prev_last))| &l_0 * (z - z_prev_last)),
         );
-                    .zip(polys.chunks(self.permutation_chunk_size))
-                    .zip(permutation_fixeds.chunks(self.permutation_chunk_size))
-                    .enumerate()
-                    .map(
-                        |(
-                            i,
-                            ((((z, z_omega, _), (_, z_next_omega, _)), polys), permutation_fixeds),
-                        )| {
-                            let left = if self.zk || zs.len() == 1 {
-                                z_omega.clone()
-                            } else {
-                                z_omega + l_last * (z_next_omega - z_omega)
-                            } * polys
-                                .iter()
-                                .zip(permutation_fixeds.iter())
-                                .map(|(poly, permutation_fixed)| {
-                                    poly + beta * permutation_fixed + gamma
-                                })
-                                .reduce(|acc, expr| acc * expr)
-                                .unwrap();
-                            let right = z * polys
-                                .iter()
-                                .zip(
-                                    iter::successors(
-                                        Some(F::DELTA.pow_vartime([
-                                            (i * self.permutation_chunk_size) as u64,
-                                        ])),
-                                        |delta| Some(F::DELTA * delta),
-                                    )
-                                    .map(Expression::Constant),
-                                )
-                                .map(|(poly, delta)| poly + beta * delta * identity + gamma)
-                                .reduce(|acc, expr| acc * expr)
-                                .unwrap();
-                            if self.zk {
-                                l_active * (left - right)
-                            } else {
-                                left - right
-                            }
-                        },
-                    ),
-            )
-            .collect_vec()
+
+        constraints.extend(
+            zs.iter()
+                .zip(polys.chunks(self.permutation_chunk_size))
+                .zip(permutation_fixeds.chunks(self.permutation_chunk_size))
+                .enumerate()
+                .map(|(i, (((z, z_omega, _), polys), permutation_fixeds))| {
+                    let left = z_omega
+                        * polys
+                            .iter()
+                            .zip(permutation_fixeds.iter())
+                            .map(|(poly, permutation_fixed)| {
+                                poly + &beta * permutation_fixed + &gamma
+                            })
+                            .reduce(|acc, expr| acc * expr)
+                            .unwrap();
+                    let right = z * polys
+                        .iter()
+                        .zip(
+                            std::iter::successors(
+                                Some(HaloFr::DELTA.pow_vartime(&[
+                                    (i * self.permutation_chunk_size) as u64,
+                                    0,
+                                    0,
+                                    0,
+                                ])),
+                                |delta| Some(HaloFr::DELTA * delta),
+                            )
+                            .map(Expression::Constant),
+                        )
+                        .map(|(poly, delta)| poly + &beta * &delta * &identity + &gamma)
+                        .reduce(|acc, expr| acc * expr)
+                        .unwrap();
+                    &l_active * (left - right)
+                }),
+        );
+
+        constraints
     }
 
-    fn lookup_constraints(&'a self, t: usize) -> impl IntoIterator<Item = Expression<F>> + 'a {
-        let one = &Expression::Constant(F::ONE);
-        let l_0 = &Expression::<F>::CommonPolynomial(CommonPolynomial::Lagrange(0));
-        let l_last = &self.l_last();
-        let l_active = &self.l_active();
-        let beta = &self.beta();
-        let gamma = &self.gamma();
+    fn lookup_constraints(&self) -> Result<Vec<Expression<HaloFr>>> {
+        let one = Expression::Constant(HaloFr::ONE);
+        let l_0 = Expression::<HaloFr>::CommonPolynomial(CommonPolynomial::Lagrange(0));
+        let l_last = self.l_last();
+        let l_active = self.l_active();
+        let beta = self.beta();
+        let gamma = self.gamma();
 
         let polys = (0..self.num_lookup_z)
             .map(|i| {
-                let (z, permuted_input, permuted_table) = self.lookup_poly(t, i);
+                let (z, permuted_input, permuted_table) = self.lookup_poly(i);
                 (
-                    Expression::<F>::Polynomial(Query::new(z, 0)),
-                    Expression::<F>::Polynomial(Query::new(z, 1)),
-                    Expression::<F>::Polynomial(Query::new(permuted_input, 0)),
-                    Expression::<F>::Polynomial(Query::new(permuted_input, -1)),
-                    Expression::<F>::Polynomial(Query::new(permuted_table, 0)),
+                    Expression::<HaloFr>::Polynomial(Query::new(z, Rotation(0))),
+                    Expression::<HaloFr>::Polynomial(Query::new(z, Rotation(1))),
+                    Expression::<HaloFr>::Polynomial(Query::new(permuted_input, Rotation(0))),
+                    Expression::<HaloFr>::Polynomial(Query::new(permuted_input, Rotation(-1))),
+                    Expression::<HaloFr>::Polynomial(Query::new(permuted_table, Rotation(0))),
                 )
             })
             .collect_vec();
 
-        let compress = |expressions: &'a [plonk::Expression<F>]| {
-            halo2_distribute_powers(
-                expressions.iter().map(|expression| self.convert(expression, t)).collect(),
-                self.theta(),
-            )
-        };
-
-        self.cs
-            .lookups()
-            .iter()
-            .zip(polys.iter())
-            .flat_map(
-                |(
-                    lookup,
-                    (z, z_omega, permuted_input, permuted_input_omega_inv, permuted_table),
-                )| {
-                    let input = compress(lookup.input_expressions());
-                    let table = compress(lookup.table_expressions());
-                    iter::empty()
-                        .chain(Some(l_0 * (one - z)))
-                        .chain(self.zk.then(|| l_last * (z * z - z)))
-                        .chain(Some(if self.zk {
-                            l_active
-                                * (z_omega * (permuted_input + beta) * (permuted_table + gamma)
-                                    - z * (input + beta) * (table + gamma))
-                        } else {
-                            z_omega * (permuted_input + beta) * (permuted_table + gamma)
-                                - z * (input + beta) * (table + gamma)
-                        }))
-                        .chain(self.zk.then(|| l_0 * (permuted_input - permuted_table)))
-                        .chain(Some(if self.zk {
-                            l_active
-                                * (permuted_input - permuted_table)
-                                * (permuted_input - permuted_input_omega_inv)
-                        } else {
-                            (permuted_input - permuted_table)
-                                * (permuted_input - permuted_input_omega_inv)
-                        }))
-                },
-            )
-            .collect_vec()
-    }
-
-    fn quotient(&self) -> QuotientPolynomial<F> {
-        let constraints = (0..self.num_proof)
-            .flat_map(|t| {
-                iter::empty()
-                    .chain(self.gate_constraints(t))
-                    .chain(self.permutation_constraints(t))
-                    .chain(self.lookup_constraints(t))
-            })
-            .collect_vec();
-        let numerator = halo2_distribute_powers(constraints, self.alpha());
-        QuotientPolynomial {
-            chunk_degree: 1,
-            // Halo2's default split base is z^n unless protocol metadata overrides it later.
-            chunk_base: crate::verifier::plonk::protocol::QuotientChunkBase::Zn,
-            num_chunk_override: None,
-            numerator,
-        }
-    }
-
-    fn accumulator_indices(
-        &self,
-        accumulator_indices: Vec<(usize, usize)>,
-    ) -> Vec<Vec<(usize, usize)>> {
-        (0..self.num_proof)
-            .map(|t| {
-                accumulator_indices
+        let mut constraints = Vec::new();
+        for (lookup, (z, z_omega, permuted_input, permuted_input_omega_inv, permuted_table)) in
+            self.cs.lookups().iter().zip(polys.iter())
+        {
+            let input = self.distribute_powers(
+                lookup
+                    .input_expressions()
                     .iter()
-                    .cloned()
-                    .map(|(poly, row)| (poly + t * self.num_instance.len(), row))
-                    .collect()
-            })
-            .collect()
+                    .map(|expr| self.convert_expression(expr))
+                    .collect::<Result<Vec<_>>>()?,
+                self.theta(),
+            );
+            let table = self.distribute_powers(
+                lookup
+                    .table_expressions()
+                    .iter()
+                    .map(|expr| self.convert_expression(expr))
+                    .collect::<Result<Vec<_>>>()?,
+                self.theta(),
+            );
+
+            constraints.push(&l_0 * (&one - z));
+            constraints.push(&l_last * (z * z - z));
+            constraints.push(
+                &l_active
+                    * (z_omega * (permuted_input + &beta) * (permuted_table + &gamma)
+                        - z * (input + &beta) * (table + &gamma)),
+            );
+            constraints.push(&l_0 * (permuted_input - permuted_table));
+            constraints.push(
+                &l_active
+                    * (permuted_input - permuted_table)
+                    * (permuted_input - permuted_input_omega_inv),
+            );
+        }
+        Ok(constraints)
+    }
+
+
+    fn distribute_powers(
+        &self,
+        expressions: Vec<Expression<HaloFr>>,
+        challenge: Expression<HaloFr>,
+    ) -> Expression<HaloFr> {
+        halo2_distribute_powers(expressions, challenge)
+    }
+
+    fn quotient(&self) -> Result<QuotientPolynomial<HaloFr>> {
+        let constraints = self
+            .gate_constraints()?
+            .into_iter()
+            .chain(self.permutation_constraints())
+            .chain(self.lookup_constraints()?)
+            .collect_vec();
+
+        Ok(QuotientPolynomial {
+            chunk_degree: 1,
+            chunk_base: QuotientChunkBase::ZnMinusOne,
+            num_chunk_override: Some(self.vk.get_domain().get_quotient_poly_degree()),
+            numerator: self.distribute_powers(constraints, self.alpha()),
+        })
     }
 }
 
-struct MockChallenge;
+/// Dummy circuit type to satisfy VK deserialization. We don't use params.
+#[derive(Clone, Debug)]
+pub(super) struct DummyCircuit;
 
-impl<C: CurveAffine> EncodedChallenge<C> for MockChallenge {
-    type Input = ();
+impl midnight_proofs::plonk::Circuit<Fq> for DummyCircuit {
+    type Config = ();
+    type FloorPlanner = midnight_proofs::circuit::SimpleFloorPlanner;
+    type Params = ();
 
-    fn new(_: &Self::Input) -> Self {
-        unreachable!()
+    fn without_witnesses(&self) -> Self {
+        DummyCircuit
     }
 
-    fn get_scalar(&self) -> C::Scalar {
-        unreachable!()
-    }
-}
+    fn configure(_: &mut midnight_proofs::plonk::ConstraintSystem<Fq>) -> Self::Config {}
 
-#[derive(Default)]
-struct MockTranscript<F: PrimeField>(F);
-
-impl<C: CurveAffine> Transcript<C, MockChallenge> for MockTranscript<C::Scalar> {
-    fn squeeze_challenge(&mut self) -> MockChallenge {
-        unreachable!()
-    }
-
-    fn common_point(&mut self, _: C) -> io::Result<()> {
-        unreachable!()
-    }
-
-    fn common_scalar(&mut self, scalar: C::Scalar) -> io::Result<()> {
-        self.0 = scalar;
+    fn synthesize(
+        &self,
+        _config: Self::Config,
+        _layouter: impl midnight_proofs::circuit::Layouter<Fq>,
+    ) -> Result<(), midnight_proofs::plonk::Error> {
         Ok(())
     }
-}
-
-/// Returns the transcript initial state of the [VerifyingKey].
-/// Roundabout way to do it because [VerifyingKey] doesn't expose the field.
-pub fn transcript_initial_state<C: CurveAffine>(vk: &VerifyingKey<C>) -> C::Scalar {
-    let mut transcript = MockTranscript::default();
-    vk.hash_into(&mut transcript).unwrap();
-    transcript.0
-}
-
-fn instance_committing_key<'a, C: CurveAffine, P: Params<'a, C>>(
-    params: &P,
-    len: usize,
-) -> InstanceCommittingKey<C> {
-    let buf = {
-        let mut buf = Vec::new();
-        params.write(&mut buf).unwrap();
-        buf
-    };
-
-    let repr = C::Repr::default();
-    let repr_len = repr.as_ref().len();
-    let offset = size_of::<u32>() + (1 << params.k()) * repr_len;
-
-    let bases = (offset..)
-        .step_by(repr_len)
-        .map(|offset| {
-            let mut repr = C::Repr::default();
-            repr.as_mut().copy_from_slice(&buf[offset..offset + repr_len]);
-            C::from_bytes(&repr).unwrap()
-        })
-        .take(len)
-        .collect();
-
-    let w = {
-        let offset = size_of::<u32>() + (2 << params.k()) * repr_len;
-        let mut repr = C::Repr::default();
-        repr.as_mut().copy_from_slice(&buf[offset..offset + repr_len]);
-        C::from_bytes(&repr).unwrap()
-    };
-
-    InstanceCommittingKey { bases, constant: Some(w) }
 }
