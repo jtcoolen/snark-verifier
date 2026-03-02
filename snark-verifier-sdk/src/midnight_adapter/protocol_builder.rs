@@ -258,286 +258,286 @@ impl<'a> MidnightProtocolBuilder<'a> {
     }
 
     fn beta(&self) -> Expression<HaloFr> {
-            .chain(num_challenge)
-            .chain([
-                2, // beta, gamma
-                1, // alpha
-            ])
-            .collect()
+        Expression::Challenge(self.system_challenge_offset() + 1)
     }
 
-    fn instance_offset(&self) -> usize {
-        self.num_preprocessed()
+    fn gamma(&self) -> Expression<HaloFr> {
+        Expression::Challenge(self.system_challenge_offset() + 2)
     }
 
-    fn witness_offset(&self) -> usize {
-        self.instance_offset() + self.num_instance().len()
+    // Challenge used to compress each trashcan's constraint vector.
+    fn trash_challenge(&self) -> Expression<HaloFr> {
+        Expression::Challenge(self.system_challenge_offset() + 3)
     }
 
-    fn cs_witness_offset(&self) -> usize {
-        self.witness_offset() + self.num_witness().iter().take(self.num_advice.len()).sum::<usize>()
-    }
-
-    fn query<C: Into<Any> + Copy, R: Into<Rotation>>(
-        &self,
-        column_type: C,
-        mut column_index: usize,
-        rotation: R,
-        t: usize,
-    ) -> Query {
-        let offset = match column_type.into() {
-            Any::Fixed => 0,
-            Any::Instance => self.instance_offset() + t * self.num_instance.len(),
-            Any::Advice(advice) => {
-                column_index = self.advice_index[column_index];
-                let phase_offset = self.num_proof
-                    * self.num_advice[..advice.phase() as usize].iter().sum::<usize>();
-                self.witness_offset() + phase_offset + t * self.num_advice[advice.phase() as usize]
-            }
-        };
-        Query::new(offset + column_index, rotation.into())
-    }
-
-    fn instance_queries(&'a self, t: usize) -> impl IntoIterator<Item = Query> + 'a {
-        self.query_instance
-            .then(|| {
-                self.cs.instance_queries().iter().map(move |(column, rotation)| {
-                    self.query(*column.column_type(), column.index(), *rotation, t)
-                })
-            })
-            .into_iter()
-            .flatten()
-    }
-
-    fn advice_queries(&'a self, t: usize) -> impl IntoIterator<Item = Query> + 'a {
-        self.cs.advice_queries().iter().map(move |(column, rotation)| {
-            self.query(*column.column_type(), column.index(), *rotation, t)
-        })
-    }
-
-    fn fixed_queries(&'a self) -> impl IntoIterator<Item = Query> + 'a {
-        self.cs.fixed_queries().iter().map(move |(column, rotation)| {
-            self.query(*column.column_type(), column.index(), *rotation, 0)
-        })
-    }
-
-    fn permutation_fixed_queries(&'a self) -> impl IntoIterator<Item = Query> + 'a {
-        (0..self.num_permutation_fixed).map(|i| Query::new(self.num_fixed + i, 0))
-    }
-
-    fn permutation_poly(&'a self, t: usize, i: usize) -> usize {
-        let z_offset = self.cs_witness_offset() + self.num_witness()[self.num_advice.len()];
-        z_offset + t * self.num_permutation_z + i
-    }
-
-    fn permutation_z_queries<const EVAL: bool>(
-        &'a self,
-        t: usize,
-    ) -> impl IntoIterator<Item = Query> + 'a {
-        match (self.zk, EVAL) {
-            (true, true) => (0..self.num_permutation_z)
-                .flat_map(move |i| {
-                    let z = self.permutation_poly(t, i);
-                    iter::empty().chain([Query::new(z, 0), Query::new(z, 1)]).chain(
-                        if i == self.num_permutation_z - 1 {
-                            None
-                        } else {
-                            Some(Query::new(z, self.rotation_last()))
-                        },
-                    )
-                })
-                .collect_vec(),
-            (true, false) => iter::empty()
-                .chain((0..self.num_permutation_z).flat_map(move |i| {
-                    let z = self.permutation_poly(t, i);
-                    [Query::new(z, 0), Query::new(z, 1)]
-                }))
-                .chain((0..self.num_permutation_z).rev().skip(1).map(move |i| {
-                    let z = self.permutation_poly(t, i);
-                    Query::new(z, self.rotation_last())
-                }))
-                .collect_vec(),
-            (false, _) => (0..self.num_permutation_z)
-                .flat_map(move |i| {
-                    let z = self.permutation_poly(t, i);
-                    [Query::new(z, 0), Query::new(z, 1)]
-                })
-                .collect_vec(),
-        }
-    }
-
-    fn lookup_poly(&'a self, t: usize, i: usize) -> (usize, usize, usize) {
-        let permuted_offset = self.cs_witness_offset();
-        let z_offset = permuted_offset
-            + self.num_witness()[self.num_advice.len()]
-            + self.num_proof * self.num_permutation_z;
-        let z = z_offset + t * self.num_lookup_z + i;
-        let permuted_input = permuted_offset + 2 * (t * self.num_lookup_z + i);
-        let permuted_table = permuted_input + 1;
-        (z, permuted_input, permuted_table)
-    }
-
-    fn lookup_queries<const EVAL: bool>(
-        &'a self,
-        t: usize,
-    ) -> impl IntoIterator<Item = Query> + 'a {
-        (0..self.num_lookup_z).flat_map(move |i| {
-            let (z, permuted_input, permuted_table) = self.lookup_poly(t, i);
-            if EVAL {
-                [
-                    Query::new(z, 0),
-                    Query::new(z, 1),
-                    Query::new(permuted_input, 0),
-                    Query::new(permuted_input, -1),
-                    Query::new(permuted_table, 0),
-                ]
-            } else {
-                [
-                    Query::new(z, 0),
-                    Query::new(permuted_input, 0),
-                    Query::new(permuted_table, 0),
-                    Query::new(permuted_input, -1),
-                    Query::new(z, 1),
-                ]
-            }
-        })
-    }
-
-    fn quotient_query(&self) -> Query {
-        Query::new(self.witness_offset() + self.num_witness().iter().sum::<usize>(), 0)
-    }
-
-    fn random_query(&self) -> Option<Query> {
-        self.zk.then(|| {
-            Query::new(self.witness_offset() + self.num_witness().iter().sum::<usize>() - 1, 0)
-        })
-    }
-
-    fn convert(&self, expression: &plonk::Expression<F>, t: usize) -> Expression<F> {
-        expression.evaluate(
-            &|scalar| Expression::Constant(scalar),
-            &|_| unreachable!(),
-            &|query| self.query(Any::Fixed, query.column_index(), query.rotation(), t).into(),
-            &|query| {
-                self.query(
-                    match query.phase() {
-                        0 => Any::advice_in(FirstPhase),
-                        1 => Any::advice_in(SecondPhase),
-                        2 => Any::advice_in(ThirdPhase),
-                        _ => unreachable!(),
-                    },
-                    query.column_index(),
-                    query.rotation(),
-                    t,
-                )
-                .into()
-            },
-            &|query| self.query(Any::Instance, query.column_index(), query.rotation(), t).into(),
-            &|challenge| {
-                let phase_offset =
-                    self.num_challenge[..challenge.phase() as usize].iter().sum::<usize>();
-                Expression::Challenge(phase_offset + self.challenge_index[challenge.index()])
-            },
-            &|a| -a,
-            &|a, b| a + b,
-            &|a, b| a * b,
-            &|a, scalar| a * scalar,
-        )
-    }
-
-    fn gate_constraints(&'a self, t: usize) -> impl IntoIterator<Item = Expression<F>> + 'a {
-        self.cs.gates().iter().flat_map(move |gate| {
-            gate.polynomials().iter().map(move |expression| self.convert(expression, t))
-        })
+    fn alpha(&self) -> Expression<HaloFr> {
+        Expression::Challenge(self.system_challenge_offset() + 4)
     }
 
     fn rotation_last(&self) -> Rotation {
         halo2_rotation_last(self.cs.blinding_factors())
     }
 
-    fn l_last(&self) -> Expression<F> {
-        if self.zk {
-            halo2_l_last(self.rotation_last())
-        } else {
-            Expression::CommonPolynomial(CommonPolynomial::Lagrange(-1))
+    fn query(
+        &self,
+        column_type: Any,
+        column_index: usize,
+        rotation: midnight_proofs::poly::Rotation,
+    ) -> Query {
+        match column_type {
+            Any::Fixed => Query::new(column_index, Rotation(rotation.0)),
+            Any::Instance => {
+                Query::new(self.instance_offset() + column_index, Rotation(rotation.0))
+            }
+            Any::Advice(advice) => {
+                let phase = advice.phase() as usize;
+                let phase_offset = self.num_advice[..phase].iter().sum::<usize>();
+                Query::new(
+                    self.witness_offset() + phase_offset + self.advice_index[column_index],
+                    Rotation(rotation.0),
+                )
+            }
         }
     }
 
-    fn l_blind(&self) -> Expression<F> {
+    fn advice_query_any(phase: u8) -> Result<Any> {
+        match phase {
+            0 => Ok(Any::advice_in(FirstPhase)),
+            1 => Ok(Any::advice_in(SecondPhase)),
+            2 => Ok(Any::advice_in(ThirdPhase)),
+            _ => bail!("unsupported midnight advice phase {phase}"),
+        }
+    }
+
+    fn convert_expression(
+        &self,
+        expression: &MidnightExpression<Fq>,
+    ) -> Result<Expression<HaloFr>> {
+        match expression {
+            MidnightExpression::Constant(scalar) => {
+                Ok(Expression::Constant(midnight_fq_to_halo_fr(*scalar)?))
+            }
+            MidnightExpression::Selector(_) => {
+                bail!("unexpected selector in midnight expression (selectors should be fixed)")
+            }
+            MidnightExpression::Fixed(query) => {
+                Ok(self.query(Any::Fixed, query.column_index(), query.rotation()).into())
+            }
+            MidnightExpression::Advice(query) => {
+                let any = Self::advice_query_any(query.phase())?;
+                Ok(self.query(any, query.column_index(), query.rotation()).into())
+            }
+            MidnightExpression::Instance(query) => {
+                Ok(self.query(Any::Instance, query.column_index(), query.rotation()).into())
+            }
+            MidnightExpression::Challenge(challenge) => {
+                let phase_offset =
+                    self.num_challenge[..challenge.phase() as usize].iter().sum::<usize>();
+                Ok(Expression::Challenge(phase_offset + self.challenge_index[challenge.index()]))
+            }
+            MidnightExpression::Negated(a) => Ok(-self.convert_expression(a)?),
+            MidnightExpression::Sum(a, b) => {
+                Ok(self.convert_expression(a)? + self.convert_expression(b)?)
+            }
+            MidnightExpression::Product(a, b) => {
+                Ok(self.convert_expression(a)? * self.convert_expression(b)?)
+            }
+            MidnightExpression::Scaled(a, scalar) => {
+                Ok(self.convert_expression(a)? * midnight_fq_to_halo_fr(*scalar)?)
+            }
+        }
+    }
+
+    // Only include instance queries for columns encoded as commitments.
+    fn committed_instance_queries(&self) -> Vec<Query> {
+        self.cs
+            .instance_queries()
+            .iter()
+            .filter(|(column, _)| column.index() < self.committed_instance_count)
+            .map(|(column, rotation)| self.query(Any::Instance, column.index(), *rotation))
+            .collect()
+    }
+
+    fn advice_queries(&self) -> Result<Vec<Query>> {
+        self.cs
+            .advice_queries()
+            .iter()
+            .map(|(column, rotation)| {
+                let any = Self::advice_query_any(column.column_type().phase())?;
+                Ok(self.query(any, column.index(), *rotation))
+            })
+            .collect()
+    }
+
+    fn fixed_queries(&self) -> Vec<Query> {
+        self.cs
+            .fixed_queries()
+            .iter()
+            .map(|(column, rotation)| self.query(Any::Fixed, column.index(), *rotation))
+            .collect()
+    }
+
+    fn permutation_fixed_queries(&self) -> Vec<Query> {
+        (0..self.num_permutation_fixed)
+            .map(|i| Query::new(self.num_fixed + i, Rotation(0)))
+            .collect()
+    }
+
+    fn permutation_poly(&self, i: usize) -> usize {
+        self.perm_lookup_offset() + i
+    }
+
+    fn permutation_z_queries(&self, eval: bool) -> Vec<Query> {
+        if self.num_permutation_z == 0 {
+            return vec![];
+        }
+        if eval {
+            (0..self.num_permutation_z)
+                .flat_map(|i| {
+                    let z = self.permutation_poly(i);
+                    let mut queries = vec![Query::new(z, Rotation(0)), Query::new(z, Rotation(1))];
+                    if i != self.num_permutation_z - 1 {
+                        queries.push(Query::new(z, self.rotation_last()));
+                    }
+                    queries
+                })
+                .collect()
+        } else {
+            (0..self.num_permutation_z)
+                .flat_map(|i| {
+                    let z = self.permutation_poly(i);
+                    vec![Query::new(z, Rotation(0)), Query::new(z, Rotation(1))]
+                })
+                .chain((0..self.num_permutation_z).rev().skip(1).map(|i| {
+                    let z = self.permutation_poly(i);
+                    Query::new(z, self.rotation_last())
+                }))
+                .collect()
+        }
+    }
+
+    fn lookup_poly(&self, i: usize) -> (usize, usize, usize) {
+        let z = self.perm_lookup_offset() + self.num_permutation_z + i;
+        let permuted_input = self.lookup_permuted_offset() + 2 * i;
+        let permuted_table = permuted_input + 1;
+        (z, permuted_input, permuted_table)
+    }
+
+    fn lookup_queries(&self, eval: bool) -> Vec<Query> {
+        (0..self.num_lookup_z)
+            .flat_map(|i| {
+                let (z, permuted_input, permuted_table) = self.lookup_poly(i);
+                if eval {
+                    vec![
+                        Query::new(z, Rotation(0)),
+                        Query::new(z, Rotation(1)),
+                        Query::new(permuted_input, Rotation(0)),
+                        Query::new(permuted_input, Rotation(-1)),
+                        Query::new(permuted_table, Rotation(0)),
+                    ]
+                } else {
+                    vec![
+                        Query::new(z, Rotation(0)),
+                        Query::new(permuted_input, Rotation(0)),
+                        Query::new(permuted_table, Rotation(0)),
+                        Query::new(permuted_input, Rotation(-1)),
+                        Query::new(z, Rotation(1)),
+                    ]
+                }
+            })
+            .collect()
+    }
+
+    fn trash_poly(&self, i: usize) -> usize {
+        self.trash_random_offset() + i
+    }
+
+    // Query trash witness columns at rotation 0.
+    fn trash_queries(&self) -> Vec<Query> {
+        (0..self.num_trash).map(|i| Query::new(self.trash_poly(i), Rotation(0))).collect()
+    }
+
+    fn random_query(&self) -> Option<Query> {
+        Some(Query::new(self.random_poly_index(), Rotation(0)))
+    }
+
+    fn quotient_query(&self) -> Query {
+        Query::new(self.random_poly_index() + 1, Rotation(0))
+    }
+
+    fn l_last(&self) -> Expression<HaloFr> {
+        halo2_l_last(self.rotation_last())
+    }
+
+    fn l_blind(&self) -> Expression<HaloFr> {
         halo2_l_blind(self.rotation_last())
     }
 
-    fn l_active(&self) -> Expression<F> {
+    fn l_active(&self) -> Expression<HaloFr> {
         halo2_l_active(self.l_last(), self.l_blind())
     }
 
-    fn system_challenge_offset(&self) -> usize {
-        self.num_challenge.iter().sum()
+    fn gate_constraints(&self) -> Result<Vec<Expression<HaloFr>>> {
+        self.cs
+            .gates()
+            .iter()
+            .flat_map(|gate| gate.polynomials().iter())
+            .map(|expr| self.convert_expression(expr))
+            .collect()
     }
 
-    fn theta(&self) -> Expression<F> {
-        Expression::Challenge(self.system_challenge_offset())
-    }
-
-    fn beta(&self) -> Expression<F> {
-        Expression::Challenge(self.system_challenge_offset() + 1)
-    }
-
-    fn gamma(&self) -> Expression<F> {
-        Expression::Challenge(self.system_challenge_offset() + 2)
-    }
-
-    fn alpha(&self) -> Expression<F> {
-        Expression::Challenge(self.system_challenge_offset() + 3)
-    }
-
-    fn permutation_constraints(&'a self, t: usize) -> impl IntoIterator<Item = Expression<F>> + 'a {
-        let one = &Expression::Constant(F::ONE);
-        let l_0 = &Expression::<F>::CommonPolynomial(CommonPolynomial::Lagrange(0));
-        let l_last = &self.l_last();
-        let l_active = &self.l_active();
-        let identity = &Expression::<F>::CommonPolynomial(CommonPolynomial::Identity);
-        let beta = &self.beta();
-        let gamma = &self.gamma();
+    fn permutation_constraints(&self) -> Vec<Expression<HaloFr>> {
+        let one = Expression::Constant(HaloFr::ONE);
+        let l_0 = Expression::<HaloFr>::CommonPolynomial(CommonPolynomial::Lagrange(0));
+        let l_last = self.l_last();
+        let l_active = self.l_active();
+        let identity = Expression::<HaloFr>::CommonPolynomial(CommonPolynomial::Identity);
+        let beta = self.beta();
+        let gamma = self.gamma();
 
         let polys = self
             .cs
             .permutation()
             .get_columns()
             .iter()
-            .map(|column| self.query(*column.column_type(), column.index(), 0, t))
-            .map(Expression::<F>::Polynomial)
+            .map(|column| {
+                self.query(
+                    *column.column_type(),
+                    column.index(),
+                    midnight_proofs::poly::Rotation(0),
+                )
+            })
+            .map(Expression::<HaloFr>::Polynomial)
             .collect_vec();
         let permutation_fixeds = (0..self.num_permutation_fixed)
-            .map(|i| Query::new(self.num_fixed + i, 0))
-            .map(Expression::<F>::Polynomial)
+            .map(|i| Query::new(self.num_fixed + i, Rotation(0)))
+            .map(Expression::<HaloFr>::Polynomial)
             .collect_vec();
         let zs = (0..self.num_permutation_z)
             .map(|i| {
-                let z = self.permutation_poly(t, i);
+                let z = self.permutation_poly(i);
                 (
-                    Expression::<F>::Polynomial(Query::new(z, 0)),
-                    Expression::<F>::Polynomial(Query::new(z, 1)),
-                    Expression::<F>::Polynomial(Query::new(z, self.rotation_last())),
+                    Expression::<HaloFr>::Polynomial(Query::new(z, Rotation(0))),
+                    Expression::<HaloFr>::Polynomial(Query::new(z, Rotation(1))),
+                    Expression::<HaloFr>::Polynomial(Query::new(z, self.rotation_last())),
                 )
             })
             .collect_vec();
 
-        iter::empty()
-            .chain(zs.first().map(|(z_0, _, _)| l_0 * (one - z_0)))
-            .chain(zs.last().and_then(|(z_l, _, _)| self.zk.then(|| l_last * (z_l * z_l - z_l))))
-            .chain(if self.zk {
-                zs.iter()
-                    .skip(1)
-                    .zip(zs.iter())
-                    .map(|((z, _, _), (_, _, z_prev_last))| l_0 * (z - z_prev_last))
-                    .collect_vec()
-            } else {
-                Vec::new()
-            })
-            .chain(
-                zs.iter()
-                    .zip(zs.iter().cycle().skip(1))
+        let mut constraints = Vec::new();
+        if let Some((z_0, _, _)) = zs.first() {
+            constraints.push(&l_0 * (&one - z_0));
+        }
+        if let Some((z_l, _, _)) = zs.last() {
+            constraints.push(&l_last * (z_l * z_l - z_l));
+        }
+
+        constraints.extend(
+            zs.iter()
+                .skip(1)
+                .zip(zs.iter())
+                .map(|((z, _, _), (_, _, z_prev_last))| &l_0 * (z - z_prev_last)),
+        );
                     .zip(polys.chunks(self.permutation_chunk_size))
                     .zip(permutation_fixeds.chunks(self.permutation_chunk_size))
                     .enumerate()
