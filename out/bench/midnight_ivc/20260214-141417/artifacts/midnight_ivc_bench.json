@@ -1,0 +1,157 @@
+{
+  "calldata_bytes": 9504,
+  "compact": {
+    "opcode_version": 2,
+    "page_count": 30,
+    "page_runtime_sizes_bytes": [
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      5376
+    ],
+    "page_runtime_total_bytes": 718080,
+    "page_size_bytes": 24576,
+    "program_words": 22440,
+    "revm": {
+      "call_gas": 6587736,
+      "deployment_gas": 150676086,
+      "error": null,
+      "page_deploy_gas": 149017387,
+      "status": "ok",
+      "total_gas": 157263822,
+      "verifier_deploy_gas": 1658699
+    },
+    "runtime_code_bytes": 4032,
+    "runtime_deployment_code_bytes": 4589,
+    "total_deployed_runtime_code_bytes": 722112
+  },
+  "hybrid": {
+    "opcode_version": 2,
+    "page_count": 23,
+    "page_runtime_sizes_bytes": [
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      24576,
+      14176
+    ],
+    "page_runtime_total_bytes": 554848,
+    "page_size_bytes": 24576,
+    "program_words": 17339,
+    "revm": {
+      "call_gas": 6180922,
+      "deployment_gas": 116797181,
+      "error": null,
+      "page_deploy_gas": 115297167,
+      "status": "ok",
+      "total_gas": 122978103,
+      "verifier_deploy_gas": 1500014
+    },
+    "runtime_code_bytes": 4032,
+    "runtime_deployment_code_bytes": 4589,
+    "total_deployed_runtime_code_bytes": 558880
+  },
+  "proof_bytes": 8544,
+  "unrolled": {
+    "deployment_code_bytes": 90670,
+    "initcode_limit_bytes": 49152,
+    "initcode_within_limit": false,
+    "revm": {
+      "call_gas": 1121316,
+      "deployment_gas": 19605178,
+      "error": null,
+      "status": "ok",
+      "total_gas": 20726494
+    },
+    "runtime_code_bytes": 90640,
+    "runtime_code_limit_bytes": 24576,
+    "runtime_code_within_limit": false
+  },
+  "unrolled_sharded": {
+    "all_shard_initcode_within_limit": true,
+    "all_shard_runtime_within_limit": true,
+    "dispatcher_initcode_bytes": 954,
+    "dispatcher_initcode_within_limit": true,
+    "dispatcher_runtime_code_bytes": 189,
+    "dispatcher_runtime_code_within_limit": true,
+    "revm": {
+      "call_gas": 1355987,
+      "deployment_gas": 20062562,
+      "dispatcher_deploy_gas": 220598,
+      "error": null,
+      "shard_deploy_gas": 19841964,
+      "status": "ok",
+      "total_gas": 21418549
+    },
+    "shard_count": 4,
+    "shard_initcode_sizes_bytes": [
+      24253,
+      24299,
+      23911,
+      18697
+    ],
+    "shard_runtime_sizes_bytes": [
+      24225,
+      24271,
+      23883,
+      18669
+    ],
+    "shard_statement_end_indices": [
+      1152,
+      2304,
+      3392,
+      4334
+    ],
+    "shard_statement_start_indices": [
+      0,
+      1152,
+      2304,
+      3392
+    ],
+    "statement_count": 4334
+  }
+}

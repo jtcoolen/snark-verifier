@@ -1,0 +1,55 @@
+computed vk and pk in 71.209523875s
+collapsed accumulator (step 0): 28 field elements (896 bytes)
+generated IVC proof step 0 (Poseidon) in 129.876848083s
+collapsed accumulator (step 1): 28 field elements (896 bytes)
+generated IVC proof step 1 (EVM) in 130.024889125s
+native evm accumulators: 1
+native evm acc[0] lhs: 0000000000000000000000000000000015d2aec34e8cdf8020f880864b852e2d 9ac41ca07418c4c35b5470045c43fc5cf0f6de9dc74e8bd78a24c9cce935b255 0000000000000000000000000000000011f9c9006f0add13586f7a4d9988b5b3 048f14d32a25941f5166965c556962f56d3b89a963ef742e6cd7b7833e15189f
+native evm acc[0] rhs: 0000000000000000000000000000000011474d08cc7063d0772b3327983d85b5 fe8223894f680317cfc324fa242d521fa64755626a9d1ea7ac5f50376da737aa 0000000000000000000000000000000006eb43f39881fd1c446a2f7b781a8474 1fd104e10e575dc90efecf183ab846b1d3c3c3e10d63f8983f66d2cc1b07ac94
+proof bytes: 8544
+unrolled deployment code bytes: 90670
+unrolled runtime code bytes: 90640
+unrolled runtime deployable (EIP-170 <= 24576): false
+unrolled initcode deployable (EIP-3860 <= 49152): false
+compact runtime deployment code bytes: 4589
+compact verifier runtime code bytes: 4032
+compact page runtime sizes (bytes): [24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 5376]
+compact total deployed runtime code bytes (verifier + pages): 722112
+hybrid runtime deployment code bytes: 4589
+hybrid verifier runtime code bytes: 4032
+hybrid page runtime sizes (bytes): [24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 14176]
+hybrid total deployed runtime code bytes (verifier + pages): 558880
+unrolled-sharded dispatcher runtime bytes: 189
+unrolled-sharded dispatcher initcode bytes: 954
+unrolled-sharded shard runtime sizes (bytes): [24225, 24271, 23883, 18669]
+unrolled-sharded shard initcode sizes (bytes): [24253, 24299, 23911, 18697]
+unrolled-sharded dispatcher runtime deployable (EIP-170 <= 24576): true
+unrolled-sharded dispatcher initcode deployable (EIP-3860 <= 49152): true
+unrolled-sharded shard runtime deployable (all): true
+unrolled-sharded shard initcode deployable (all): true
+calldata bytes: 9504
+wrote out/bench/midnight_ivc/20260214-141417/artifacts/MidnightIvcVerifier.sol
+wrote out/bench/midnight_ivc/20260214-141417/artifacts/midnight_ivc.bytecode
+wrote out/bench/midnight_ivc/20260214-141417/artifacts/midnight_ivc.calldata
+wrote out/bench/midnight_ivc/20260214-141417/artifacts/MidnightIvcVerifierCompact.sol
+wrote out/bench/midnight_ivc/20260214-141417/artifacts/midnight_ivc_compact_runtime.bytecode
+wrote out/bench/midnight_ivc/20260214-141417/artifacts/midnight_ivc_compact_pages.bytecode
+wrote out/bench/midnight_ivc/20260214-141417/artifacts/midnight_ivc_compact_manifest.txt
+wrote out/bench/midnight_ivc/20260214-141417/artifacts/MidnightIvcVerifierHybrid.sol
+wrote out/bench/midnight_ivc/20260214-141417/artifacts/midnight_ivc_hybrid_runtime.bytecode
+wrote out/bench/midnight_ivc/20260214-141417/artifacts/midnight_ivc_hybrid_pages.bytecode
+wrote out/bench/midnight_ivc/20260214-141417/artifacts/midnight_ivc_hybrid_manifest.txt
+wrote out/bench/midnight_ivc/20260214-141417/artifacts/MidnightIvcVerifierUnrolledShardedDispatcher.sol
+wrote out/bench/midnight_ivc/20260214-141417/artifacts/midnight_ivc_unrolled_sharded_dispatcher.bytecode
+wrote out/bench/midnight_ivc/20260214-141417/artifacts/midnight_ivc_unrolled_sharded_shards.bytecode
+wrote out/bench/midnight_ivc/20260214-141417/artifacts/midnight_ivc_unrolled_sharded_manifest.txt
+revm deployment gas: 19605178
+revm gas: 1121316
+revm compact deployment gas: pages=149017387 verifier=1658699 total=150676086
+revm compact gas: 6587736
+revm hybrid deployment gas: pages=115297167 verifier=1500014 total=116797181
+revm hybrid gas: 6180922
+revm unrolled-sharded deployment gas: shards=19841964 dispatcher=220598 total=20062562
+revm unrolled-sharded gas: 1355987
+wrote out/bench/midnight_ivc/20260214-141417/artifacts/midnight_ivc_bench.json
+bench-summary-json=out/bench/midnight_ivc/20260214-141417/artifacts/midnight_ivc_bench.json

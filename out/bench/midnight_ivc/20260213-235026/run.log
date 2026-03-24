@@ -1,0 +1,40 @@
+computed vk and pk in 71.553218917s
+collapsed accumulator (step 0): 28 field elements (896 bytes)
+generated IVC proof step 0 (Poseidon) in 129.887591542s
+collapsed accumulator (step 1): 28 field elements (896 bytes)
+generated IVC proof step 1 (EVM) in 141.531925917s
+native evm accumulators: 1
+native evm acc[0] lhs: 000000000000000000000000000000000e6a312aa383e55706bcb4ebfe65060b cce725c19ed575e774269d447328a950e7a3a286c2179a9389b6304fac3e6d76 0000000000000000000000000000000004862b7af0abd2fa1f80dae702e81a2f 79fa799925f3b126befbfc890c2dd1afca8c21bbb2142748846ee52240eca674
+native evm acc[0] rhs: 00000000000000000000000000000000162f54a8c68e0ba27b926e74285cb648 a905ba5bd3c877416e74aba161e3b5dda1f9fa4e49ccddfd6f2470f339713818 0000000000000000000000000000000004d0867556d608516c144d92cf73bfe0 9f8423b71409d415dc8f3c7d54f635a740f90cf335402c7755daeda9fa67a16c
+proof bytes: 8544
+unrolled deployment code bytes: 94806
+unrolled runtime code bytes: 94776
+compact runtime deployment code bytes: 4525
+compact verifier runtime code bytes: 3968
+compact page runtime sizes (bytes): [24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 2464]
+compact total deployed runtime code bytes (verifier + pages): 768288
+hybrid runtime deployment code bytes: 4525
+hybrid verifier runtime code bytes: 3968
+hybrid page runtime sizes (bytes): [24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 11200]
+hybrid total deployed runtime code bytes (verifier + pages): 604992
+calldata bytes: 9504
+wrote out/bench/midnight_ivc/20260213-235026/artifacts/MidnightIvcVerifier.sol
+wrote out/bench/midnight_ivc/20260213-235026/artifacts/midnight_ivc.bytecode
+wrote out/bench/midnight_ivc/20260213-235026/artifacts/midnight_ivc.calldata
+wrote out/bench/midnight_ivc/20260213-235026/artifacts/MidnightIvcVerifierCompact.sol
+wrote out/bench/midnight_ivc/20260213-235026/artifacts/midnight_ivc_compact_runtime.bytecode
+wrote out/bench/midnight_ivc/20260213-235026/artifacts/midnight_ivc_compact_pages.bytecode
+wrote out/bench/midnight_ivc/20260213-235026/artifacts/midnight_ivc_compact_manifest.txt
+wrote out/bench/midnight_ivc/20260213-235026/artifacts/MidnightIvcVerifierHybrid.sol
+wrote out/bench/midnight_ivc/20260213-235026/artifacts/midnight_ivc_hybrid_runtime.bytecode
+wrote out/bench/midnight_ivc/20260213-235026/artifacts/midnight_ivc_hybrid_pages.bytecode
+wrote out/bench/midnight_ivc/20260213-235026/artifacts/midnight_ivc_hybrid_manifest.txt
+revm gas (reverted): 1071135
+revm verification failed: revm deployment/call failed: Contract call transaction reverts with gas_used 1071135; output=empty revert data
+note: native snark-verifier EVM-transcript verification succeeded above; this indicates a local revm/precompile divergence for this large IVC verifier
+revm compact deployment gas: pages=158648751 verifier=1690483 total=160339234
+revm compact gas: 7168000
+revm hybrid deployment gas: pages=124915335 verifier=1531797 total=126447132
+revm hybrid gas: 6730071
+wrote out/bench/midnight_ivc/20260213-235026/artifacts/midnight_ivc_bench.json
+bench-summary-json=out/bench/midnight_ivc/20260213-235026/artifacts/midnight_ivc_bench.json

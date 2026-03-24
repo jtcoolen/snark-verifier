@@ -1,0 +1,8 @@
+dispatcher_runtime_code_bytes: 189
+dispatcher_deployment_code_bytes: 954
+shard_runtime_code_bytes: [24385, 23985, 24537, 21973]
+shard_deployment_code_bytes: [24413, 24013, 24565, 22001]
+stateful_runtime_code_bytes: 2348
+stateful_deployment_code_bytes: 2781
+num_shards: 4
+num_batches: 2

@@ -1,0 +1,61 @@
+{
+  "num_batches": 3,
+  "unrolled_sharded_verifier": {
+    "dispatcher_runtime_code_bytes": 189,
+    "dispatcher_initcode_bytes": 954,
+    "shard_runtime_sizes_bytes": [
+      24345,
+      23974,
+      23527,
+      23211
+    ],
+    "shard_initcode_sizes_bytes": [
+      24373,
+      24002,
+      23555,
+      23239
+    ],
+    "runtime_code_limit_bytes": 24576,
+    "dispatcher_runtime_code_within_limit": true,
+    "all_shard_runtime_within_limit": true,
+    "initcode_limit_bytes": 49152,
+    "dispatcher_initcode_within_limit": true,
+    "all_shard_initcode_within_limit": true
+  },
+  "stateful_contract": {
+    "runtime_code_bytes": 4068,
+    "deployment_code_bytes": 4237,
+    "runtime_code_limit_bytes": 24576,
+    "runtime_code_within_limit": true,
+    "initcode_limit_bytes": 49152,
+    "initcode_within_limit": true
+  },
+  "revm_stateful_loop": {
+    "status": "ok",
+    "verifier_mode": "unrolled_sharded",
+    "shard_deploy_gas": 20709008,
+    "dispatcher_deploy_gas": 220598,
+    "verifier_deploy_gas_total": 20929606,
+    "direct_verifier_call_gas": 1387454,
+    "state_contract_deploy_gas": 1005031,
+    "call_gas_total": 4790049,
+    "call_gas_per_batch": [
+      {
+        "batch_index": 0,
+        "call_gas": 1619351,
+        "success": true
+      },
+      {
+        "batch_index": 1,
+        "call_gas": 1585283,
+        "success": true
+      },
+      {
+        "batch_index": 2,
+        "call_gas": 1585415,
+        "success": true
+      }
+    ],
+    "error": null
+  }
+}

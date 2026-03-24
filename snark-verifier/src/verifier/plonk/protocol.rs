@@ -82,6 +82,18 @@ where
     pub num_witness: Vec<usize>,
     /// Number of challenges to squeeze from transcript after each phase.
     pub num_challenge: Vec<usize>,
+    /// Number of instance columns represented as commitments instead of scalar vectors.
+    #[serde(default)]
+    pub committed_instance_count: usize,
+    /// Hash each non-committed instance column length into transcript before values.
+    #[serde(default)]
+    pub hash_instance_lengths: bool,
+    /// Number of phase-independent challenges squeezed after all phases (e.g. trash challenge).
+    #[serde(default)]
+    pub trailing_challenges: usize,
+    /// Number of additional commitments read after challenges (e.g. trash commitments).
+    #[serde(default)]
+    pub extra_commitments: usize,
     /// Evaluations to read from transcript.
     pub evaluations: Vec<Query>,
     /// [`crate::pcs::PolynomialCommitmentScheme`] queries to verify.
@@ -161,6 +173,10 @@ where
             num_instance: self.num_instance.clone(),
             num_witness: self.num_witness.clone(),
             num_challenge: self.num_challenge.clone(),
+            committed_instance_count: self.committed_instance_count,
+            hash_instance_lengths: self.hash_instance_lengths,
+            trailing_challenges: self.trailing_challenges,
+            extra_commitments: self.extra_commitments,
             evaluations: self.evaluations.clone(),
             queries: self.queries.clone(),
             quotient: self.quotient.clone(),
@@ -230,6 +246,10 @@ mod halo2 {
                 num_instance: self.num_instance.clone(),
                 num_witness: self.num_witness.clone(),
                 num_challenge: self.num_challenge.clone(),
+                committed_instance_count: self.committed_instance_count,
+                hash_instance_lengths: self.hash_instance_lengths,
+                trailing_challenges: self.trailing_challenges,
+                extra_commitments: self.extra_commitments,
                 evaluations: self.evaluations.clone(),
                 queries: self.queries.clone(),
                 quotient: self.quotient.clone(),
@@ -242,6 +262,7 @@ mod halo2 {
     }
 }
 
+#[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum CommonPolynomial {
     Identity,
@@ -258,6 +279,7 @@ where
     zn_minus_one: L::LoadedScalar,
     zn_minus_one_inv: Fraction<L::LoadedScalar>,
     identity: L::LoadedScalar,
+    identity_inv: Fraction<L::LoadedScalar>,
     lagrange: BTreeMap<i32, Fraction<L::LoadedScalar>>,
 }
 
@@ -304,11 +326,15 @@ where
             .map(|omega| Fraction::new(numer.clone() * omega, z.clone() - omega))
             .collect_vec();
 
+        let identity = z.clone();
+        let identity_inv = Fraction::one_over(identity.clone());
+
         Self {
             zn,
             zn_minus_one,
             zn_minus_one_inv,
-            identity: z.clone(),
+            identity,
+            identity_inv,
             lagrange: lagranges.into_iter().zip(lagrange_evals).collect(),
         }
     }
@@ -332,11 +358,16 @@ where
         }
     }
 
+    pub fn identity_inv(&self) -> &L::LoadedScalar {
+        self.identity_inv.evaluated()
+    }
+
     pub fn denoms(&mut self) -> impl IntoIterator<Item = &'_ mut L::LoadedScalar> {
         self.lagrange
             .iter_mut()
             .map(|(_, value)| value.denom_mut())
             .chain(iter::once(self.zn_minus_one_inv.denom_mut()))
+            .chain(iter::once(self.identity_inv.denom_mut()))
             .flatten()
     }
 
@@ -345,18 +376,36 @@ where
             .iter_mut()
             .map(|(_, value)| value)
             .chain(iter::once(&mut self.zn_minus_one_inv))
+            .chain(iter::once(&mut self.identity_inv))
             .for_each(Fraction::evaluate)
     }
 }
 
+#[allow(missing_docs)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct QuotientPolynomial<F: Clone> {
     pub chunk_degree: usize,
+    #[serde(default)]
+    pub chunk_base: QuotientChunkBase,
+    #[serde(default)]
+    pub num_chunk_override: Option<usize>,
     pub numerator: Expression<F>,
 }
 
+#[allow(missing_docs)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub enum QuotientChunkBase {
+    #[default]
+    Zn,
+    ZnMinusOne,
+}
+
+#[allow(missing_docs)]
 impl<F: Clone> QuotientPolynomial<F> {
     pub fn num_chunk(&self) -> usize {
+        if let Some(num_chunk) = self.num_chunk_override {
+            return num_chunk;
+        }
         Integer::div_ceil(
             &(self.numerator.degree().checked_sub(1).unwrap_or_default()),
             &self.chunk_degree,
@@ -364,18 +413,21 @@ impl<F: Clone> QuotientPolynomial<F> {
     }
 }
 
+#[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Query {
     pub poly: usize,
     pub rotation: Rotation,
 }
 
+#[allow(missing_docs)]
 impl Query {
     pub fn new<R: Into<Rotation>>(poly: usize, rotation: R) -> Self {
         Self { poly, rotation: rotation.into() }
     }
 }
 
+#[allow(missing_docs)]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Expression<F> {
     Constant(F),
@@ -389,6 +441,7 @@ pub enum Expression<F> {
     DistributePowers(Vec<Expression<F>>, Box<Expression<F>>),
 }
 
+#[allow(missing_docs)]
 impl<F: Clone> Expression<F> {
     pub fn evaluate<T: Clone>(
         &self,

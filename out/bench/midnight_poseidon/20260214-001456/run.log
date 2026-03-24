@@ -1,0 +1,19 @@
+proof bytes: 3968
+deployment code bytes: 21574
+calldata bytes: 4000
+wrote out/bench/midnight_poseidon/20260214-001456/artifacts/MidnightPoseidonVerifier.sol
+wrote out/bench/midnight_poseidon/20260214-001456/artifacts/midnight_poseidon.bytecode
+wrote out/bench/midnight_poseidon/20260214-001456/artifacts/midnight_poseidon.calldata
+compressed proof bytes: 2934
+compressed deployment code bytes: 41479
+compressed calldata bytes: 2966
+proof byte delta (compressed - uncompressed): -1034
+calldata byte delta (compressed - uncompressed): -1034
+wrote out/bench/midnight_poseidon/20260214-001456/artifacts/MidnightPoseidonVerifierCompressed.sol
+wrote out/bench/midnight_poseidon/20260214-001456/artifacts/midnight_poseidon_compressed.bytecode
+wrote out/bench/midnight_poseidon/20260214-001456/artifacts/midnight_poseidon_compressed.calldata
+revm gas (uncompressed): 601405
+revm gas (compressed): 1025441
+revm gas delta (compressed - uncompressed): 424036
+wrote out/bench/midnight_poseidon/20260214-001456/artifacts/midnight_poseidon_bench.json
+bench-summary-json=out/bench/midnight_poseidon/20260214-001456/artifacts/midnight_poseidon_bench.json

@@ -1,27 +1,83 @@
 pub enum Precompiled {
     BigModExp = 0x05,
-    Bn254Add = 0x6,
-    Bn254ScalarMul = 0x7,
-    Bn254Pairing = 0x8,
+    // EIP-2537 (Prague): BLS12-381 precompile addresses.
+    Bls12_381G1Msm = 0x0c,
+    Bls12_381Pairing = 0x0f,
+}
+
+/// EVM verifier codegen backend selection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EvmCodegenMode {
+    /// Emit direct unrolled assembly statements.
+    Unrolled,
+    /// Emit unrolled verifier logic split across delegate-called shard contracts.
+    UnrolledSharded,
+    /// Emit compact bytecode program interpreted by a small runtime.
+    Compact,
+    /// Emit compact program with hot scalar arithmetic opcodes for lower gas.
+    Hybrid,
+}
+
+/// Size and layout metadata for a sharded unrolled verifier program.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UnrolledShardedProgramManifest {
+    /// Runtime bytecode size limit enforced for each generated contract.
+    pub runtime_code_size_limit_bytes: usize,
+    /// Initcode size limit enforced for each generated contract.
+    pub initcode_size_limit_bytes: usize,
+    /// Total number of emitted unrolled statement blocks before sharding.
+    pub total_statements: usize,
+    /// Inclusive start statement index for each shard.
+    pub shard_statement_start_indices: Vec<usize>,
+    /// Exclusive end statement index for each shard.
+    pub shard_statement_end_indices: Vec<usize>,
+    /// Dispatcher runtime bytecode size in bytes.
+    pub dispatcher_runtime_code_bytes: usize,
+    /// Dispatcher initcode size in bytes.
+    pub dispatcher_deployment_code_bytes: usize,
+    /// Runtime bytecode size in bytes for each shard.
+    pub shard_runtime_code_bytes: Vec<usize>,
+    /// Initcode size in bytes for each shard.
+    pub shard_deployment_code_bytes: Vec<usize>,
+}
+
+/// Solidity sources and bytecode artifacts for an unrolled-sharded verifier.
+#[derive(Clone, Debug)]
+pub struct UnrolledShardedVerifierArtifacts {
+    /// Dispatcher Solidity source.
+    pub dispatcher_solidity: String,
+    /// Dispatcher deployment bytecode.
+    pub dispatcher_deployment_code: Vec<u8>,
+    /// Dispatcher runtime bytecode.
+    pub dispatcher_runtime_code: Vec<u8>,
+    /// Shard Solidity sources ordered by execution order.
+    pub shard_solidity_sources: Vec<String>,
+    /// Shard deployment bytecodes ordered by execution order.
+    pub shard_deployment_codes: Vec<Vec<u8>>,
+    /// Shard runtime bytecodes ordered by execution order.
+    pub shard_runtime_codes: Vec<Vec<u8>>,
+    /// Build manifest with sizes and statement partition metadata.
+    pub manifest: UnrolledShardedProgramManifest,
 }
 
 #[derive(Clone, Debug)]
 pub struct SolidityAssemblyCode {
     // runtime code area
     runtime: String,
+    runtime_blocks: Vec<String>,
 }
 
 impl SolidityAssemblyCode {
     pub fn new() -> Self {
-        Self { runtime: String::new() }
+        Self { runtime: String::new(), runtime_blocks: Vec::new() }
     }
 
-    pub fn code(&self, base_modulus: String, scalar_modulus: String) -> String {
+    pub fn code(&self, scalar_modulus: String) -> String {
         format!(
             "
 // SPDX-License-Identifier: MIT
 
-pragma solidity 0.8.19;
+pragma solidity >=0.8.19 <0.9.0;
 
 contract Halo2Verifier {{
     fallback(bytes calldata) external returns (bytes memory) {{
@@ -33,23 +89,7 @@ contract Halo2Verifier {{
             }}
 
             let success := true
-            let f_p := {base_modulus}
             let f_q := {scalar_modulus}
-            function validate_ec_point(x, y) -> valid {{
-                {{
-                    let x_lt_p := lt(x, {base_modulus})
-                    let y_lt_p := lt(y, {base_modulus})
-                    valid := and(x_lt_p, y_lt_p)
-                }}
-                {{
-                    let y_square := mulmod(y, y, {base_modulus})
-                    let x_square := mulmod(x, x, {base_modulus})
-                    let x_cube := mulmod(x_square, x, {base_modulus})
-                    let x_cube_plus_3 := addmod(x_cube, 3, {base_modulus})
-                    let is_affine := eq(x_cube_plus_3, y_square)
-                    valid := and(valid, is_affine)
-                }}
-            }}
             {}
         }}
     }}
@@ -60,7 +100,12 @@ contract Halo2Verifier {{
     }
 
     pub fn runtime_append(&mut self, mut code: String) {
+        self.runtime_blocks.push(code.clone());
         code.push('\n');
         self.runtime.push_str(&code);
+    }
+
+    pub fn runtime_blocks(&self) -> &[String] {
+        &self.runtime_blocks
     }
 }

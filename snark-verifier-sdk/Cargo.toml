@@ -25,9 +25,23 @@ serde_with = { version = "2.2", optional = true }
 bincode = "1.3.3"
 ark-std = { version = "0.3.0", features = ["print-trace"], optional = true }
 # halo2-base = { version = "=0.4.1", default-features = false }
-halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", tag = "v0.5.0-git", default-features = false }
+#halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", tag = "v0.5.0-git", default-features = false }
+#halo2-base = { git = "https://github.com/jtcoolen/halo2-lib.git", branch = "main" }
+
+halo2-base = { git = "https://github.com/jtcoolen/halo2-lib.git", rev = "f56347dbc1162d11ba1a52eb2e5501f93445a75d" }
 snark-verifier = { version = "=0.2.3", path = "../snark-verifier", default-features = false }
 getset = "0.1.2"
+anyhow = { version = "1", optional = true }
+
+# Optional bridge into Midnight (halo2 fork) artifacts.
+# Use versioned deps so downstream workspaces can choose local path or git via [patch].
+midnight-proofs = { version = "0.7.0", optional = true, default-features = false }
+midnight-curves = { version = "0.2.0", optional = true }
+midnight-circuits = { version = "6.0.0", optional = true, features = ["testing"] }
+midnight-zk-stdlib = { version = "1.0.0", optional = true }
+blake2b_simd = { version = "1", optional = true }
+ff = { version = "0.13", optional = true }
+sha3 = { version = "=0.10", optional = true }
 
 # loader_evm
 ethereum-types = { version = "=0.14.1", default-features = false, features = [
@@ -59,9 +73,20 @@ loader_halo2 = ["snark-verifier/loader_halo2"]
 loader_evm = ["snark-verifier/loader_evm", "dep:ethereum-types"]
 revm = ["snark-verifier/revm"]
 parallel = ["snark-verifier/parallel"]
+truncated-challenges = ["snark-verifier/truncated-challenges"]
 # EXACTLY one of halo2-pse / halo2-axiom should always be turned on; not sure how to enforce this with Cargo
 halo2-pse = ["snark-verifier/halo2-pse", "dep:serde_with"]
 halo2-axiom = ["snark-verifier/halo2-axiom"]
+midnight = [
+    "dep:midnight-proofs",
+    "dep:midnight-curves",
+    "dep:midnight-circuits",
+    "dep:midnight-zk-stdlib",
+    "dep:blake2b_simd",
+    "dep:ff",
+    "dep:sha3",
+    "dep:anyhow",
+]
 
 # zkevm = ["dep:zkevm-circuits", "dep:bus-mapping", "dep:mock", "dep:eth-types"]
 
@@ -88,3 +113,25 @@ harness = false
 [[example]]
 name = "standard_plonk"
 required-features = ["loader_halo2", "loader_evm"]
+
+[patch."https://github.com/axiom-crypto/halo2-lib.git"]
+halo2-base = { git = "https://github.com/jtcoolen/halo2-lib.git", rev = "f56347dbc1162d11ba1a52eb2e5501f93445a75d" }
+halo2-ecc  = { git = "https://github.com/jtcoolen/halo2-lib.git", rev = "f56347dbc1162d11ba1a52eb2e5501f93445a75d" }
+
+[patch.crates-io]
+halo2curves-axiom = { git = "https://github.com/jtcoolen/halo2curves.git", rev = "edeb29e7964f1d24bb3bc0d2a5f9417de92a572a" }
+
+[[example]]
+name = "midnight_poseidon"
+required-features = ["midnight"]
+path = "examples/midnight_poseidon.rs"
+
+[[example]]
+name = "midnight_poseidon_evm"
+required-features = ["midnight", "loader_evm"]
+path = "examples/midnight_poseidon_evm.rs"
+
+[[example]]
+name = "midnight_ivc_evm"
+required-features = ["midnight", "loader_evm"]
+path = "examples/midnight_ivc_evm.rs"

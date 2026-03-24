@@ -34,3 +34,19 @@ incremental = false
 [profile.flamegraph]
 inherits = "release"
 debug = true
+#[patch.crates-io]
+#halo2curves-axiom = { git = "https://github.com/jtcoolen/halo2curves.git" }
+#halo2-base = { git = "https://github.com/jtcoolen/halo2-lib.git", branch = "main" }
+
+[patch."https://github.com/axiom-crypto/halo2-lib.git"]
+halo2-ecc  = { git = "https://github.com/jtcoolen/halo2-lib.git", rev = "f56347dbc1162d11ba1a52eb2e5501f93445a75d" }
+
+[patch."https://github.com/jtcoolen/halo2-lib.git"]
+halo2-base = { path = "vendor/halo2-base" }
+
+[patch.crates-io]
+halo2curves-axiom = { git = "https://github.com/jtcoolen/halo2curves.git", rev = "edeb29e7964f1d24bb3bc0d2a5f9417de92a572a" }
+midnight-proofs = { path = "midnight-zk/proofs" }
+midnight-curves = { path = "midnight-zk/curves" }
+midnight-circuits = { path = "midnight-zk/circuits" }
+midnight-zk-stdlib = { path = "midnight-zk/zk_stdlib" }

@@ -1,62 +1,506 @@
 use revm::{
-    context::{
-        result::{ExecutionResult, Output},
-        TxEnv,
-    },
+    context::TxEnv,
+    context_interface::result::{ExecutionResult, Output},
     database::InMemoryDB,
-    primitives::TxKind,
+    primitives::{hardfork::SpecId, Bytes, TxKind},
     Context, ExecuteCommitEvm, MainBuilder, MainContext,
 };
+
+const BENCH_GAS_LIMIT: u64 = 1_000_000_000;
+
+/// Deployment and call gas metrics for a single verifier contract.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EvmExecutionMetrics {
+    /// Gas used by the contract deployment transaction.
+    pub deployment_gas: u64,
+    /// Gas used by the verifier call transaction.
+    pub call_gas: u64,
+}
+
+impl EvmExecutionMetrics {
+    /// Total gas used by deployment plus call transactions.
+    pub fn total_gas(self) -> u64 {
+        self.deployment_gas + self.call_gas
+    }
+}
+
+/// Deployment and call gas metrics for a compact verifier flow.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CompactExecutionMetrics {
+    /// Total gas used deploying all compact data pages.
+    pub page_deploy_gas: u64,
+    /// Gas used deploying the compact verifier runtime.
+    pub verifier_deploy_gas: u64,
+    /// Gas used by the verifier call transaction.
+    pub call_gas: u64,
+}
+
+/// Deployment and call gas metrics for an unrolled-sharded verifier flow.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UnrolledShardedExecutionMetrics {
+    /// Total gas used deploying all shard contracts.
+    pub shard_deploy_gas: u64,
+    /// Gas used deploying the dispatcher contract.
+    pub dispatcher_deploy_gas: u64,
+    /// Gas used by the verifier call transaction.
+    pub call_gas: u64,
+}
+
+impl UnrolledShardedExecutionMetrics {
+    /// Total gas used by sharded deployment transactions (shards + dispatcher).
+    pub fn deployment_gas(self) -> u64 {
+        self.shard_deploy_gas + self.dispatcher_deploy_gas
+    }
+
+    /// Total gas used by sharded deployment plus verifier call transactions.
+    pub fn total_gas(self) -> u64 {
+        self.deployment_gas() + self.call_gas
+    }
+}
+
+impl CompactExecutionMetrics {
+    /// Total gas used by compact deployment transactions (pages + verifier).
+    pub fn deployment_gas(self) -> u64 {
+        self.page_deploy_gas + self.verifier_deploy_gas
+    }
+
+    /// Total gas used by compact deployment plus verifier call transactions.
+    pub fn total_gas(self) -> u64 {
+        self.deployment_gas() + self.call_gas
+    }
+}
+
+fn read_usize_from_abi_word(word: &[u8]) -> Option<usize> {
+    if word.len() != 32 || word[..24].iter().any(|&b| b != 0) {
+        return None;
+    }
+    Some(u64::from_be_bytes(word[24..32].try_into().ok()?) as usize)
+}
+
+fn decode_revert_output(output: &[u8]) -> String {
+    if output.is_empty() {
+        return "empty revert data".to_string();
+    }
+
+    if output.len() >= 4 {
+        let selector = &output[..4];
+        // Error(string)
+        if selector == [0x08, 0xc3, 0x79, 0xa0] && output.len() >= 68 {
+            let offset = match read_usize_from_abi_word(&output[4..36]) {
+                Some(v) => v,
+                None => return format!("0x{}", hex::encode(output)),
+            };
+            let len_pos = 4 + offset;
+            if len_pos + 32 <= output.len() {
+                if let Some(str_len) = read_usize_from_abi_word(&output[len_pos..len_pos + 32]) {
+                    let str_start = len_pos + 32;
+                    let str_end = str_start.saturating_add(str_len);
+                    if str_end <= output.len() {
+                        if let Ok(reason) = std::str::from_utf8(&output[str_start..str_end]) {
+                            return format!("Error(\"{reason}\")");
+                        }
+                    }
+                }
+            }
+        }
+        // Panic(uint256)
+        if selector == [0x4e, 0x48, 0x7b, 0x71] && output.len() >= 36 {
+            if let Some(code) = read_usize_from_abi_word(&output[4..36]) {
+                return format!("Panic(0x{code:x})");
+            }
+        }
+    }
+
+    format!("0x{}", hex::encode(output))
+}
 
 /// Deploy contract and then call with calldata.
 /// Returns gas_used of call to deployed contract if both transactions are successful.
 pub fn deploy_and_call(deployment_code: Vec<u8>, calldata: Vec<u8>) -> Result<u64, String> {
-    let mut evm = Context::mainnet().with_db(InMemoryDB::default()).build_mainnet();
+    deploy_and_call_with_metrics(deployment_code, calldata).map(|metrics| metrics.call_gas)
+}
 
-    let tx = TxEnv {
-        gas_limit: u64::MAX,
-        kind: TxKind::Create,
-        data: deployment_code.into(),
-        ..Default::default()
-    };
+/// Deploy contract and then call with calldata.
+/// Returns deployment+call gas metrics if both transactions are successful.
+pub fn deploy_and_call_with_metrics(
+    deployment_code: Vec<u8>,
+    calldata: Vec<u8>,
+) -> Result<EvmExecutionMetrics, String> {
+    let mut evm = Context::mainnet()
+        .modify_cfg_chained(|cfg| {
+            cfg.spec = SpecId::PRAGUE;
+            // Allow oversized verifier contracts in local simulation.
+            cfg.limit_contract_code_size = Some(usize::MAX);
+            cfg.limit_contract_initcode_size = Some(usize::MAX);
+            cfg.disable_nonce_check = true;
+            // Disable Osaka tx gas cap (EIP-7825) in local simulation.
+            cfg.tx_gas_limit_cap = Some(BENCH_GAS_LIMIT);
+        })
+        .with_db(InMemoryDB::default())
+        .build_mainnet();
 
-    let result = evm.transact_commit(tx).unwrap();
-    let contract = match result {
+    let deployment_tx = TxEnv::builder()
+        .gas_limit(BENCH_GAS_LIMIT)
+        .kind(TxKind::Create)
+        .data(Bytes::from(deployment_code))
+        .build_fill();
+
+    let result = evm
+        .transact_commit(deployment_tx)
+        .map_err(|err| format!("revm deployment error: {err}"))?;
+    let (contract, deployment_gas) = match result {
         ExecutionResult::Success {
+            gas_used,
             output: Output::Create(_, Some(contract)),
             ..
-        } => contract,
+        } => (contract, gas_used),
         ExecutionResult::Revert { gas_used, output } => {
+            let decoded = decode_revert_output(&output);
             return Err(format!(
-                "Contract deployment transaction reverts with gas_used {gas_used} and output {:#x}",
-                output
+                "Contract deployment transaction reverts with gas_used {gas_used}; output={decoded}"
             ))
         }
         ExecutionResult::Halt { reason, gas_used } => return Err(format!(
                 "Contract deployment transaction halts unexpectedly with gas_used {gas_used} and reason {:?}",
                 reason
             )),
-        _ => unreachable!(),
+        ExecutionResult::Success { output, .. } => {
+            return Err(format!(
+                "Contract deployment returned unexpected output variant: {:?}",
+                output
+            ))
+        }
     };
 
-    let tx = TxEnv {
-        gas_limit: u64::MAX,
-        kind: TxKind::Call(contract),
-        data: calldata.into(),
-        nonce: 1,
-        ..Default::default()
-    };
+    let call_tx = TxEnv::builder()
+        .gas_limit(BENCH_GAS_LIMIT)
+        .kind(TxKind::Call(contract))
+        .data(Bytes::from(calldata))
+        .build_fill();
 
-    let result = evm.transact_commit(tx).unwrap();
+    let result = evm.transact_commit(call_tx).map_err(|err| format!("revm call error: {err}"))?;
     match result {
-        ExecutionResult::Success { gas_used, .. } => Ok(gas_used),
-        ExecutionResult::Revert { gas_used, output } => Err(format!(
-            "Contract call transaction reverts with gas_used {gas_used} and output {:#x}",
-            output
-        )),
+        ExecutionResult::Success { gas_used, .. } => {
+            Ok(EvmExecutionMetrics { deployment_gas, call_gas: gas_used })
+        }
+        ExecutionResult::Revert { gas_used, output } => {
+            let decoded = decode_revert_output(&output);
+            Err(format!(
+                "Contract call transaction reverts with gas_used {gas_used}; output={decoded}"
+            ))
+        }
         ExecutionResult::Halt { reason, gas_used } => Err(format!(
             "Contract call transaction halts unexpectedly with gas_used {gas_used} and reason {:?}",
             reason
         )),
     }
+}
+
+/// Deploy page contracts, deploy compact verifier (with constructor args
+/// encoding page addresses and program word length), then call verifier.
+pub fn deploy_compact_and_call(
+    page_deployments: Vec<Vec<u8>>,
+    verifier_deployment_base: Vec<u8>,
+    program_words: usize,
+    calldata: Vec<u8>,
+) -> Result<u64, String> {
+    deploy_compact_and_call_with_metrics(
+        page_deployments,
+        verifier_deployment_base,
+        program_words,
+        calldata,
+    )
+    .map(|metrics| metrics.call_gas)
+}
+
+/// Deploy unrolled shard contracts, deploy dispatcher (with constructor args
+/// encoding shard addresses), then call verifier.
+pub fn deploy_unrolled_sharded_and_call(
+    shard_deployments: Vec<Vec<u8>>,
+    dispatcher_deployment_base: Vec<u8>,
+    calldata: Vec<u8>,
+) -> Result<u64, String> {
+    deploy_unrolled_sharded_and_call_with_metrics(
+        shard_deployments,
+        dispatcher_deployment_base,
+        calldata,
+    )
+    .map(|metrics| metrics.call_gas)
+}
+
+/// Deploy unrolled shard contracts, deploy dispatcher, then call verifier.
+/// Returns detailed deployment+call gas metrics.
+pub fn deploy_unrolled_sharded_and_call_with_metrics(
+    shard_deployments: Vec<Vec<u8>>,
+    dispatcher_deployment_base: Vec<u8>,
+    calldata: Vec<u8>,
+) -> Result<UnrolledShardedExecutionMetrics, String> {
+    let mut evm = Context::mainnet()
+        .modify_cfg_chained(|cfg| {
+            cfg.spec = SpecId::PRAGUE;
+            cfg.limit_contract_code_size = Some(usize::MAX);
+            cfg.limit_contract_initcode_size = Some(usize::MAX);
+            cfg.disable_nonce_check = true;
+            cfg.tx_gas_limit_cap = Some(BENCH_GAS_LIMIT);
+        })
+        .with_db(InMemoryDB::default())
+        .build_mainnet();
+
+    let mut shard_addresses = Vec::with_capacity(shard_deployments.len());
+    let mut shard_deploy_gas = 0u64;
+    for deployment_code in shard_deployments {
+        let deployment_tx = TxEnv::builder()
+            .gas_limit(BENCH_GAS_LIMIT)
+            .kind(TxKind::Create)
+            .data(Bytes::from(deployment_code))
+            .build_fill();
+
+        let result = evm
+            .transact_commit(deployment_tx)
+            .map_err(|err| format!("revm shard deployment error: {err}"))?;
+        let (shard, gas_used) = match result {
+            ExecutionResult::Success {
+                gas_used,
+                output: Output::Create(_, Some(contract)),
+                ..
+            } => (contract, gas_used),
+            ExecutionResult::Revert { gas_used, output } => {
+                let decoded = decode_revert_output(&output);
+                return Err(format!(
+                    "Unrolled-sharded shard deployment reverts with gas_used {gas_used}; output={decoded}"
+                ));
+            }
+            ExecutionResult::Halt { reason, gas_used } => {
+                return Err(format!(
+                    "Unrolled-sharded shard deployment halts with gas_used {gas_used} and reason {:?}",
+                    reason
+                ));
+            }
+            ExecutionResult::Success { output, .. } => {
+                return Err(format!(
+                    "Unrolled-sharded shard deployment returned unexpected output: {output:?}"
+                ));
+            }
+        };
+        shard_deploy_gas += gas_used;
+        shard_addresses.push(shard);
+    }
+
+    let mut dispatcher_deployment = dispatcher_deployment_base;
+    dispatcher_deployment.extend_from_slice(&encode_sharded_constructor_args(&shard_addresses));
+
+    let dispatcher_tx = TxEnv::builder()
+        .gas_limit(BENCH_GAS_LIMIT)
+        .kind(TxKind::Create)
+        .data(Bytes::from(dispatcher_deployment))
+        .build_fill();
+
+    let result = evm
+        .transact_commit(dispatcher_tx)
+        .map_err(|err| format!("revm sharded dispatcher deployment error: {err}"))?;
+    let (dispatcher, dispatcher_deploy_gas) = match result {
+        ExecutionResult::Success {
+            gas_used, output: Output::Create(_, Some(contract)), ..
+        } => (contract, gas_used),
+        ExecutionResult::Revert { gas_used, output } => {
+            let decoded = decode_revert_output(&output);
+            return Err(format!(
+                "Unrolled-sharded dispatcher deployment reverts with gas_used {gas_used}; output={decoded}"
+            ));
+        }
+        ExecutionResult::Halt { reason, gas_used } => {
+            return Err(format!(
+                "Unrolled-sharded dispatcher deployment halts with gas_used {gas_used} and reason {:?}",
+                reason
+            ));
+        }
+        ExecutionResult::Success { output, .. } => {
+            return Err(format!(
+                "Unrolled-sharded dispatcher deployment returned unexpected output: {output:?}"
+            ));
+        }
+    };
+
+    let call_tx = TxEnv::builder()
+        .gas_limit(BENCH_GAS_LIMIT)
+        .kind(TxKind::Call(dispatcher))
+        .data(Bytes::from(calldata))
+        .build_fill();
+
+    let result = evm
+        .transact_commit(call_tx)
+        .map_err(|err| format!("revm sharded dispatcher call error: {err}"))?;
+    match result {
+        ExecutionResult::Success { gas_used, .. } => Ok(UnrolledShardedExecutionMetrics {
+            shard_deploy_gas,
+            dispatcher_deploy_gas,
+            call_gas: gas_used,
+        }),
+        ExecutionResult::Revert { gas_used, output } => {
+            let decoded = decode_revert_output(&output);
+            Err(format!(
+                "Unrolled-sharded dispatcher call reverts with gas_used {gas_used}; output={decoded}"
+            ))
+        }
+        ExecutionResult::Halt { reason, gas_used } => Err(format!(
+            "Unrolled-sharded dispatcher call halts unexpectedly with gas_used {gas_used} and reason {:?}",
+            reason
+        )),
+    }
+}
+
+/// Deploy page contracts, deploy compact verifier, then call verifier.
+/// Returns detailed deployment+call gas metrics.
+pub fn deploy_compact_and_call_with_metrics(
+    page_deployments: Vec<Vec<u8>>,
+    verifier_deployment_base: Vec<u8>,
+    program_words: usize,
+    calldata: Vec<u8>,
+) -> Result<CompactExecutionMetrics, String> {
+    let mut evm = Context::mainnet()
+        .modify_cfg_chained(|cfg| {
+            cfg.spec = SpecId::PRAGUE;
+            // Allow oversized verifier contracts in local simulation.
+            cfg.limit_contract_code_size = Some(usize::MAX);
+            cfg.limit_contract_initcode_size = Some(usize::MAX);
+            cfg.disable_nonce_check = true;
+            // Disable Osaka tx gas cap (EIP-7825) in local simulation.
+            cfg.tx_gas_limit_cap = Some(BENCH_GAS_LIMIT);
+        })
+        .with_db(InMemoryDB::default())
+        .build_mainnet();
+
+    let mut page_addresses = Vec::with_capacity(page_deployments.len());
+    let mut page_deploy_gas = 0u64;
+    for deployment_code in page_deployments {
+        let deployment_tx = TxEnv::builder()
+            .gas_limit(BENCH_GAS_LIMIT)
+            .kind(TxKind::Create)
+            .data(Bytes::from(deployment_code))
+            .build_fill();
+
+        let result = evm
+            .transact_commit(deployment_tx)
+            .map_err(|err| format!("revm page deployment error: {err}"))?;
+        let (page, gas_used) = match result {
+            ExecutionResult::Success {
+                gas_used,
+                output: Output::Create(_, Some(contract)),
+                ..
+            } => (contract, gas_used),
+            ExecutionResult::Revert { gas_used, output } => {
+                let decoded = decode_revert_output(&output);
+                return Err(format!(
+                    "Compact page deployment reverts with gas_used {gas_used}; output={decoded}"
+                ));
+            }
+            ExecutionResult::Halt { reason, gas_used } => {
+                return Err(format!(
+                    "Compact page deployment halts with gas_used {gas_used} and reason {:?}",
+                    reason
+                ));
+            }
+            ExecutionResult::Success { output, .. } => {
+                return Err(format!(
+                    "Compact page deployment returned unexpected output: {output:?}"
+                ));
+            }
+        };
+        page_deploy_gas += gas_used;
+        page_addresses.push(page);
+    }
+
+    let mut verifier_deployment = verifier_deployment_base;
+    verifier_deployment
+        .extend_from_slice(&encode_compact_constructor_args(&page_addresses, program_words));
+
+    let verifier_tx = TxEnv::builder()
+        .gas_limit(BENCH_GAS_LIMIT)
+        .kind(TxKind::Create)
+        .data(Bytes::from(verifier_deployment))
+        .build_fill();
+
+    let result = evm
+        .transact_commit(verifier_tx)
+        .map_err(|err| format!("revm compact verifier deployment error: {err}"))?;
+    let (verifier, verifier_deploy_gas) = match result {
+        ExecutionResult::Success {
+            gas_used, output: Output::Create(_, Some(contract)), ..
+        } => (contract, gas_used),
+        ExecutionResult::Revert { gas_used, output } => {
+            let decoded = decode_revert_output(&output);
+            return Err(format!(
+                "Compact verifier deployment reverts with gas_used {gas_used}; output={decoded}"
+            ));
+        }
+        ExecutionResult::Halt { reason, gas_used } => {
+            return Err(format!(
+                "Compact verifier deployment halts with gas_used {gas_used} and reason {:?}",
+                reason
+            ));
+        }
+        ExecutionResult::Success { output, .. } => {
+            return Err(format!(
+                "Compact verifier deployment returned unexpected output: {output:?}"
+            ));
+        }
+    };
+
+    let call_tx = TxEnv::builder()
+        .gas_limit(BENCH_GAS_LIMIT)
+        .kind(TxKind::Call(verifier))
+        .data(Bytes::from(calldata))
+        .build_fill();
+
+    let result = evm
+        .transact_commit(call_tx)
+        .map_err(|err| format!("revm compact verifier call error: {err}"))?;
+    match result {
+        ExecutionResult::Success { gas_used, .. } => {
+            Ok(CompactExecutionMetrics { page_deploy_gas, verifier_deploy_gas, call_gas: gas_used })
+        }
+        ExecutionResult::Revert { gas_used, output } => {
+            let decoded = decode_revert_output(&output);
+            Err(format!("Compact verifier call reverts with gas_used {gas_used}; output={decoded}"))
+        }
+        ExecutionResult::Halt { reason, gas_used } => Err(format!(
+            "Compact verifier call halts unexpectedly with gas_used {gas_used} and reason {:?}",
+            reason
+        )),
+    }
+}
+
+fn encode_compact_constructor_args(
+    page_addresses: &[revm::primitives::Address],
+    program_words: usize,
+) -> Vec<u8> {
+    let mut encoded = Vec::with_capacity(32 * (3 + page_addresses.len()));
+    encoded.extend_from_slice(&abi_word_from_usize(0x40));
+    encoded.extend_from_slice(&abi_word_from_usize(program_words));
+    encoded.extend_from_slice(&abi_word_from_usize(page_addresses.len()));
+    for address in page_addresses {
+        let mut word = [0u8; 32];
+        word[12..].copy_from_slice(address.as_slice());
+        encoded.extend_from_slice(&word);
+    }
+    encoded
+}
+
+fn encode_sharded_constructor_args(shard_addresses: &[revm::primitives::Address]) -> Vec<u8> {
+    let mut encoded = Vec::with_capacity(32 * (2 + shard_addresses.len()));
+    encoded.extend_from_slice(&abi_word_from_usize(0x20));
+    encoded.extend_from_slice(&abi_word_from_usize(shard_addresses.len()));
+    for address in shard_addresses {
+        let mut word = [0u8; 32];
+        word[12..].copy_from_slice(address.as_slice());
+        encoded.extend_from_slice(&word);
+    }
+    encoded
+}
+
+fn abi_word_from_usize(value: usize) -> [u8; 32] {
+    let mut word = [0u8; 32];
+    let be = (value as u64).to_be_bytes();
+    word[24..].copy_from_slice(&be);
+    word
 }

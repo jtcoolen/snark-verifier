@@ -1,0 +1,47 @@
+{
+  "num_transitions": 2,
+  "unrolled_sharded_verifier": {
+    "dispatcher_runtime_code_bytes": 189,
+    "dispatcher_initcode_bytes": 954,
+    "shard_runtime_sizes_bytes": [
+      24051,
+      24267,
+      23453,
+      24553,
+      12534
+    ],
+    "shard_initcode_sizes_bytes": [
+      24079,
+      24295,
+      23481,
+      24581,
+      12562
+    ],
+    "runtime_code_limit_bytes": 24576,
+    "dispatcher_runtime_code_within_limit": true,
+    "all_shard_runtime_within_limit": true,
+    "initcode_limit_bytes": 49152,
+    "dispatcher_initcode_within_limit": true,
+    "all_shard_initcode_within_limit": true
+  },
+  "revm": {
+    "status": "ok",
+    "shard_deploy_gas": 23744265,
+    "dispatcher_deploy_gas": 243478,
+    "deployment_gas_total": 23987743,
+    "call_gas_total": 3189708,
+    "call_gas_per_transition": [
+      {
+        "batch_index": 0,
+        "transition_index": 0,
+        "call_gas": 1594872
+      },
+      {
+        "batch_index": 0,
+        "transition_index": 1,
+        "call_gas": 1594836
+      }
+    ],
+    "error": null
+  }
+}

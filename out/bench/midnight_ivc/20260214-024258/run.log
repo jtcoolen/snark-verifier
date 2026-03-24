@@ -1,0 +1,41 @@
+computed vk and pk in 63.646973459s
+collapsed accumulator (step 0): 28 field elements (896 bytes)
+generated IVC proof step 0 (Poseidon) in 132.551646958s
+collapsed accumulator (step 1): 28 field elements (896 bytes)
+generated IVC proof step 1 (EVM) in 149.463145875s
+native evm accumulators: 1
+native evm acc[0] lhs: 00000000000000000000000000000000154e08fbe55296242d1b8cfa80eba1d9 e109aff788c35fa1fefb3ebc45bd2f0063b66a4537753b026006fc5e4f6c4f43 000000000000000000000000000000000a5cfc14912bd9e1b48ceeebeb011192 113bacec79ce14095c84da1b2f392e1f3296031ab0353fbfaa40bc6115d96144
+native evm acc[0] rhs: 0000000000000000000000000000000009908f668b8bd62ea0b6cbce16ba93a0 9e3453528c79927c56694809079c8a0850632d8988daa7ddeae1d1ba362c1658 0000000000000000000000000000000007d24739be59360ad4e1107f409ba097 85348ecf7300a291d5c7e552902f2d22f1f41b884c3986826be7c81bcbf7232a
+proof bytes: 8544
+unrolled deployment code bytes: 90669
+unrolled runtime code bytes: 90639
+unrolled runtime deployable (EIP-170 <= 24576): false
+unrolled initcode deployable (EIP-3860 <= 49152): false
+compact runtime deployment code bytes: 4589
+compact verifier runtime code bytes: 4032
+compact page runtime sizes (bytes): [24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 5376]
+compact total deployed runtime code bytes (verifier + pages): 722112
+hybrid runtime deployment code bytes: 4589
+hybrid verifier runtime code bytes: 4032
+hybrid page runtime sizes (bytes): [24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 24576, 14176]
+hybrid total deployed runtime code bytes (verifier + pages): 558880
+calldata bytes: 9504
+wrote out/bench/midnight_ivc/20260214-024258/artifacts/MidnightIvcVerifier.sol
+wrote out/bench/midnight_ivc/20260214-024258/artifacts/midnight_ivc.bytecode
+wrote out/bench/midnight_ivc/20260214-024258/artifacts/midnight_ivc.calldata
+wrote out/bench/midnight_ivc/20260214-024258/artifacts/MidnightIvcVerifierCompact.sol
+wrote out/bench/midnight_ivc/20260214-024258/artifacts/midnight_ivc_compact_runtime.bytecode
+wrote out/bench/midnight_ivc/20260214-024258/artifacts/midnight_ivc_compact_pages.bytecode
+wrote out/bench/midnight_ivc/20260214-024258/artifacts/midnight_ivc_compact_manifest.txt
+wrote out/bench/midnight_ivc/20260214-024258/artifacts/MidnightIvcVerifierHybrid.sol
+wrote out/bench/midnight_ivc/20260214-024258/artifacts/midnight_ivc_hybrid_runtime.bytecode
+wrote out/bench/midnight_ivc/20260214-024258/artifacts/midnight_ivc_hybrid_pages.bytecode
+wrote out/bench/midnight_ivc/20260214-024258/artifacts/midnight_ivc_hybrid_manifest.txt
+revm deployment gas: 19604962
+revm gas: 1121256
+revm compact deployment gas: pages=149017387 verifier=1658699 total=150676086
+revm compact gas: 6587676
+revm hybrid deployment gas: pages=115297167 verifier=1500014 total=116797181
+revm hybrid gas: 6180862
+wrote out/bench/midnight_ivc/20260214-024258/artifacts/midnight_ivc_bench.json
+bench-summary-json=out/bench/midnight_ivc/20260214-024258/artifacts/midnight_ivc_bench.json

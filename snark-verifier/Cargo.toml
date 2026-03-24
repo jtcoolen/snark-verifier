@@ -19,11 +19,15 @@ hex = "0.4"
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 pairing = { version = "0.23" }
-
+serde_json = "1.0"
 # Use halo2-base as non-optional dependency because it re-exports halo2_proofs, halo2curves, and poseidon, using different repos based on feature flag "halo2-axiom" or "halo2-pse"
 # halo2-base = { version = "=0.4.1", default-features = false }
-halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", tag = "v0.5.0-git", default-features = false }
+#halo2-base = { git = "https://github.com/axiom-crypto/halo2-lib.git", tag = "v0.5.0-git", default-features = false }
+#halo2-base = { git = "https://github.com/jtcoolen/halo2-lib.git", branch = "main" }
 
+halo2-base = { git = "https://github.com/jtcoolen/halo2-lib.git", rev = "f56347dbc1162d11ba1a52eb2e5501f93445a75d" }
+halo2curves-axiom = { git = "https://github.com/jtcoolen/halo2curves.git" }
+#halo2curves = { version = "0.7.0", default-features = false } #git = "https://github.com/privacy-ethereum/halo2curves.git" }
 # loader_halo2
 # halo2-ecc = { version = "=0.4.1", default-features = false, optional = true }
 halo2-ecc = { git = "https://github.com/axiom-crypto/halo2-lib.git", tag = "v0.5.0-git", default-features = false, optional = true }
@@ -36,7 +40,7 @@ sha3 = { version = "=0.10", optional = true }
 ruint = { version = "1.14", optional = true }
 
 # revm only used for testing smart contract execution
-revm = { version = "27.1.0", optional = true }
+revm = { version = "=27.1.0", default-features = false, features = ["std", "secp256k1"], optional = true }
 
 [dev-dependencies]
 ark-std = { version = "0.3.0", features = ["print-trace"] }
@@ -57,6 +61,7 @@ loader_halo2 = ["halo2-ecc"]
 loader_evm = ["dep:sha3", "dep:ruint"]
 revm = ["loader_evm", "dep:revm"]
 parallel = ["dep:rayon"]
+truncated-challenges = []
 # EXACTLY one of halo2-pse / halo2-axiom should always be turned on; not sure how to enforce this with Cargo
 halo2-pse = ["halo2-base/halo2-pse", "halo2-ecc?/halo2-pse"]
 halo2-axiom = ["halo2-base/halo2-axiom", "halo2-ecc?/halo2-axiom"]
@@ -72,3 +77,10 @@ required-features = ["loader_halo2", "loader_evm"]
 [[example]]
 name = "recursion"
 required-features = ["loader_halo2"]
+
+[patch."https://github.com/axiom-crypto/halo2-lib.git"]
+halo2-base = { git = "https://github.com/jtcoolen/halo2-lib.git", rev = "f56347dbc1162d11ba1a52eb2e5501f93445a75d" }
+halo2-ecc  = { git = "https://github.com/jtcoolen/halo2-lib.git", rev = "f56347dbc1162d11ba1a52eb2e5501f93445a75d" }
+
+[patch.crates-io]
+halo2curves-axiom = { git = "https://github.com/jtcoolen/halo2curves.git", rev = "edeb29e7964f1d24bb3bc0d2a5f9417de92a572a" }

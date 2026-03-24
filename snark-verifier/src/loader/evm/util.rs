@@ -9,7 +9,12 @@ use std::{
 };
 
 #[cfg(feature = "revm")]
-pub use executor::deploy_and_call;
+pub use executor::{
+    deploy_and_call, deploy_and_call_with_metrics, deploy_compact_and_call,
+    deploy_compact_and_call_with_metrics, deploy_unrolled_sharded_and_call,
+    deploy_unrolled_sharded_and_call_with_metrics, CompactExecutionMetrics, EvmExecutionMetrics,
+    UnrolledShardedExecutionMetrics,
+};
 pub use ruint::aliases::{B160 as Address, B256, U256, U512};
 
 #[cfg(feature = "revm")]
@@ -105,18 +110,65 @@ pub fn estimate_gas(cost: Cost) -> usize {
 
 /// Compile given Solidity `code` into deployment bytecode.
 pub fn compile_solidity(code: &str) -> Vec<u8> {
-    let mut cmd = Command::new("solc")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .arg("--bin")
-        .arg("-")
-        .spawn()
-        .unwrap();
-    cmd.stdin.take().unwrap().write_all(code.as_bytes()).unwrap();
-    let output = cmd.wait_with_output().unwrap().stdout;
-    let binary = *split_by_ascii_whitespace(&output).last().unwrap();
-    assert!(!binary.is_empty());
-    hex::decode(binary).unwrap()
+    compile_solidity_with_args(code, &["--bin"], "solc --bin")
+}
+
+/// Compile given Solidity `code` into deployment bytecode using optimizer + via-IR.
+pub fn compile_solidity_via_ir(code: &str) -> Vec<u8> {
+    compile_solidity_with_args(
+        code,
+        &["--bin", "--optimize", "--via-ir"],
+        "solc --bin --optimize --via-ir",
+    )
+}
+
+/// Compile given Solidity `code` and return runtime bytecode.
+pub fn compile_solidity_runtime(code: &str) -> Vec<u8> {
+    compile_solidity_with_args(code, &["--bin-runtime"], "solc --bin-runtime")
+}
+
+/// Compile given Solidity `code` and return runtime bytecode using optimizer + via-IR.
+pub fn compile_solidity_runtime_via_ir(code: &str) -> Vec<u8> {
+    compile_solidity_with_args(
+        code,
+        &["--bin-runtime", "--optimize", "--via-ir"],
+        "solc --bin-runtime --optimize --via-ir",
+    )
+}
+
+fn compile_solidity_with_args(code: &str, args: &[&str], label: &str) -> Vec<u8> {
+    let mut cmd = Command::new("solc");
+    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    for arg in args {
+        cmd.arg(arg);
+    }
+    let mut child = cmd.arg("-").spawn().unwrap();
+    child.stdin.take().unwrap().write_all(code.as_bytes()).unwrap();
+    let output = child.wait_with_output().unwrap();
+    if !output.status.success() {
+        panic!(
+            "{label} failed (status {}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let stdout = output.stdout;
+    let stderr = output.stderr;
+    let binary = extract_solc_binary(&stdout).unwrap_or_else(|| {
+        panic!(
+            "{label} produced no bytecode output; stdout: {}; stderr: {}",
+            String::from_utf8_lossy(&stdout),
+            String::from_utf8_lossy(&stderr)
+        )
+    });
+    hex::decode(binary).unwrap_or_else(|err| {
+        panic!(
+            "{label} produced invalid bytecode token {:?}: {err}; stdout: {}; stderr: {}",
+            String::from_utf8_lossy(binary),
+            String::from_utf8_lossy(&stdout),
+            String::from_utf8_lossy(&stderr)
+        )
+    })
 }
 
 fn split_by_ascii_whitespace(bytes: &[u8]) -> Vec<&[u8]> {
@@ -137,6 +189,14 @@ fn split_by_ascii_whitespace(bytes: &[u8]) -> Vec<&[u8]> {
     split
 }
 
+fn extract_solc_binary(stdout: &[u8]) -> Option<&[u8]> {
+    split_by_ascii_whitespace(stdout).into_iter().rev().find(|token| {
+        !token.is_empty()
+            && token.len() % 2 == 0
+            && token.iter().all(|byte| byte.is_ascii_hexdigit())
+    })
+}
+
 #[test]
 fn test_split_by_ascii_whitespace_1() {
     let bytes = b" \x01 \x02   \x03";
@@ -149,4 +209,17 @@ fn test_split_by_ascii_whitespace_2() {
     let bytes = b"123456789abc";
     let split = split_by_ascii_whitespace(bytes);
     assert_eq!(split, [b"123456789abc"]);
+}
+
+#[test]
+fn test_extract_solc_binary_skips_empty_abstract_binary() {
+    let stdout = br#"
+======= <stdin>:AAA =======
+Binary:
+6080
+
+======= <stdin>:ZZZ =======
+Binary:
+"#;
+    assert_eq!(extract_solc_binary(stdout), Some(&b"6080"[..]));
 }

@@ -1,0 +1,3 @@
+[submodule "cardhalo"]
+	path = cardhalo
+	url = https://github.com/rrtoledo/cardhalo.git
