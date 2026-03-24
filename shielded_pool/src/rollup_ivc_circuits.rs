@@ -1236,6 +1236,8 @@ pub struct WrapStepCircuit {
 
     /// Host-computed Merkle hash over L2 block metadata, exposed as public input.
     pub l2_metadata_merkle_hash: Value<F>,
+    /// Flattened L2 block metadata (rows of `CLIENT_ITEMS_WIDTH`), used for hybrid compression checks.
+    pub l2_block_metadata: Vec<Value<F>>,
 }
 
 impl Circuit<F> for WrapStepCircuit {
@@ -1261,6 +1263,7 @@ impl Circuit<F> for WrapStepCircuit {
             blk_pre: Value::unknown(),
             blk_post: Value::unknown(),
             l2_metadata_merkle_hash: Value::unknown(),
+            l2_block_metadata: self.l2_block_metadata.iter().map(|_| Value::unknown()).collect(),
         }
     }
 
@@ -1349,6 +1352,54 @@ impl Circuit<F> for WrapStepCircuit {
         let metadata_merkle_hash: AssignedNative<F> =
             ctx.scalar.assign(&mut layouter, self.l2_metadata_merkle_hash.clone())?;
         ctx.scalar.constrain_as_public_input(&mut layouter, &metadata_merkle_hash)?;
+
+        // Bind the flattened metadata witness to the aggregation subroot by recomputing
+        // the same Poseidon tree used by the rollup transition aggregation.
+        if self.l2_block_metadata.is_empty()
+            || self.l2_block_metadata.len() % CLIENT_ITEMS_WIDTH != 0
+        {
+            return Err(Error::Synthesis("invalid l2_block_metadata length".to_string()));
+        }
+        let metadata_leaf_count = self.l2_block_metadata.len() / CLIENT_ITEMS_WIDTH;
+        if !metadata_leaf_count.is_power_of_two() {
+            return Err(Error::Synthesis("invalid l2_block_metadata row count".to_string()));
+        }
+
+        let mut assigned_metadata = Vec::with_capacity(self.l2_block_metadata.len());
+        for value in &self.l2_block_metadata {
+            assigned_metadata.push(ctx.scalar.assign(&mut layouter, *value)?);
+        }
+
+        let mut metadata_level_hashes = Vec::with_capacity(metadata_leaf_count);
+        for row in assigned_metadata.chunks_exact(CLIENT_ITEMS_WIDTH) {
+            metadata_level_hashes.push(ctx.poseidon.hash(&mut layouter, row)?);
+        }
+
+        while metadata_level_hashes.len() > 1 {
+            let mut next_level_hashes = Vec::with_capacity(metadata_level_hashes.len() / 2);
+            for pair in metadata_level_hashes.chunks_exact(2) {
+                next_level_hashes.push(ctx.hash2(&mut layouter, &pair[0], &pair[1])?);
+            }
+            metadata_level_hashes = next_level_hashes;
+        }
+
+        let metadata_poseidon_subroot = metadata_level_hashes
+            .pop()
+            .ok_or_else(|| Error::Synthesis("missing metadata Poseidon subroot".to_string()))?;
+        ctx.assert_eq(&mut layouter, &subroot, &metadata_poseidon_subroot)?;
+
+        // Hybrid compression consistency value:
+        // gamma = UHF(alpha + beta, metadata), where alpha=keccak(metadata) and beta=Poseidon-subroot.
+        let hybrid_seed = ctx.scalar.add(&mut layouter, &metadata_merkle_hash, &subroot)?;
+        let mut hybrid_power = ctx.one(&mut layouter)?;
+        let mut hybrid_gamma = ctx.zero(&mut layouter)?;
+        for value in &assigned_metadata {
+            let term = ctx.scalar.mul(&mut layouter, &hybrid_power, value, None)?;
+            hybrid_gamma = ctx.scalar.add(&mut layouter, &hybrid_gamma, &term)?;
+            hybrid_power = ctx.scalar.mul(&mut layouter, &hybrid_power, &hybrid_seed, None)?;
+        }
+        // Contract recomputes this exact gamma from calldata metadata.
+        ctx.scalar.constrain_as_public_input(&mut layouter, &hybrid_gamma)?;
 
         // --------------------- Verify top aggregation proofs and fold accumulators ---------------------
         let assigned_vk = ctx.assign_vkdata(&mut layouter, &self.child_vk_name, &self.child_vk)?;

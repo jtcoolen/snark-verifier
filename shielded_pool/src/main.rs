@@ -93,6 +93,9 @@ const STATE_TRANSITION_PUBLIC_INPUTS: usize = 9;
 #[cfg(feature = "evm-bench")]
 const L2_METADATA_MERKLE_PUBLIC_INPUTS: usize = 1;
 #[cfg(feature = "evm-bench")]
+// Hybrid-compression binding scalar gamma = UHF(alpha + beta, metadata).
+const HYBRID_UHF_PUBLIC_INPUTS: usize = 1;
+#[cfg(feature = "evm-bench")]
 const FINAL_ACC_PUBLIC_INPUTS: usize = 28;
 #[cfg(feature = "evm-bench")]
 const SUBROOT_PUBLIC_INPUT_INDEX: usize = 6;
@@ -100,10 +103,13 @@ const SUBROOT_PUBLIC_INPUT_INDEX: usize = 6;
 const CLIENT_PUBLIC_ITEMS_WIDTH: usize = rollup_ivc_circuits::CLIENT_ITEMS_WIDTH;
 #[cfg(feature = "evm-bench")]
 const FINAL_ACC_PUBLIC_INPUTS_OFFSET: usize =
-    STATE_TRANSITION_PUBLIC_INPUTS + L2_METADATA_MERKLE_PUBLIC_INPUTS;
+    STATE_TRANSITION_PUBLIC_INPUTS + L2_METADATA_MERKLE_PUBLIC_INPUTS + HYBRID_UHF_PUBLIC_INPUTS;
 #[cfg(feature = "evm-bench")]
 const PROOF_PUBLIC_INPUTS: usize =
-    STATE_TRANSITION_PUBLIC_INPUTS + L2_METADATA_MERKLE_PUBLIC_INPUTS + FINAL_ACC_PUBLIC_INPUTS;
+    STATE_TRANSITION_PUBLIC_INPUTS
+        + L2_METADATA_MERKLE_PUBLIC_INPUTS
+        + HYBRID_UHF_PUBLIC_INPUTS
+        + FINAL_ACC_PUBLIC_INPUTS;
 #[cfg(feature = "evm-bench")]
 type RevmMainnetContext = revm::context::Context<
     revm::context::BlockEnv,
@@ -1216,6 +1222,8 @@ contract ShieldedPoolStatefulVerifier {{
         0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001;
     uint256 internal constant CLIENT_PUBLIC_ITEMS_WIDTH = {client_public_items_width};
     uint256 internal constant SUBROOT_PI_OFFSET = 0xc0;
+    uint256 internal constant METADATA_HASH_PI_OFFSET = 0x120;
+    uint256 internal constant HYBRID_GAMMA_PI_OFFSET = 0x140;
     uint256 internal constant G1MSM_GAS_CAP = 5000000;
     uint256 internal constant PAIRING_GAS_CAP = 20000000;
 
@@ -1254,33 +1262,50 @@ contract ShieldedPoolStatefulVerifier {{
         blockHead = _blockHead;
     }}
 
+    function _extractProofPublicInputWord(
+        bytes calldata verifierCalldata,
+        uint256 offset
+    ) private pure returns (uint256 word) {{
+        if (verifierCalldata.length < offset + 0x20) revert InvalidTransition(6);
+        assembly ("memory-safe") {{
+            word := calldataload(add(verifierCalldata.offset, offset))
+        }}
+    }}
+
     /// Subroot is exposed as public input #6 in the final-wrap verifier calldata.
     function _extractSubrootFromProofPublicInputs(
         bytes calldata verifierCalldata
     ) private pure returns (uint256 subroot) {{
-        if (verifierCalldata.length < SUBROOT_PI_OFFSET + 0x20) revert InvalidTransition(6);
-        assembly ("memory-safe") {{
-            subroot := calldataload(add(verifierCalldata.offset, SUBROOT_PI_OFFSET))
-        }}
+        return _extractProofPublicInputWord(verifierCalldata, SUBROOT_PI_OFFSET);
+    }}
+
+    function _extractMetadataHashFromProofPublicInputs(
+        bytes calldata verifierCalldata
+    ) private pure returns (uint256 metadataHash) {{
+        return _extractProofPublicInputWord(verifierCalldata, METADATA_HASH_PI_OFFSET);
+    }}
+
+    function _extractHybridGammaFromProofPublicInputs(
+        bytes calldata verifierCalldata
+    ) private pure returns (uint256 hybridGamma) {{
+        return _extractProofPublicInputWord(verifierCalldata, HYBRID_GAMMA_PI_OFFSET);
     }}
 
     function _keccakToField(bytes32 digest) private pure returns (uint256) {{
         return uint256(digest) % FIELD_MODULUS;
     }}
 
-    function _keccakHashPair(uint256 left, uint256 right) private pure returns (uint256) {{
-        return _keccakToField(keccak256(abi.encodePacked(left, right)));
+    function _keccakHashPair(bytes32 left, bytes32 right) private pure returns (bytes32) {{
+        return keccak256(abi.encodePacked(left, right));
     }}
 
     function _keccakHashClientPublicItems(
         uint256[] calldata l2BlockMetadata,
         uint256 start
-    ) private pure returns (uint256) {{
-        return _keccakToField(
-            keccak256(
-                abi.encodePacked(
+    ) private pure returns (bytes32) {{
+        return keccak256(
+            abi.encodePacked(
 {client_public_items_encode_args}
-                )
             )
         );
     }}
@@ -1295,7 +1320,7 @@ contract ShieldedPoolStatefulVerifier {{
         uint256 leafCount = metadataLen / CLIENT_PUBLIC_ITEMS_WIDTH;
         if ((leafCount & (leafCount - 1)) != 0) revert InvalidTransition(12);
 
-        uint256[] memory level = new uint256[](leafCount);
+        bytes32[] memory level = new bytes32[](leafCount);
         for (uint256 i = 0; i < leafCount; ++i) {{
             uint256 start = i * CLIENT_PUBLIC_ITEMS_WIDTH;
             level[i] = _keccakHashClientPublicItems(l2BlockMetadata, start);
@@ -1309,7 +1334,18 @@ contract ShieldedPoolStatefulVerifier {{
             }}
             leafCount = nextCount;
         }}
-        return level[0];
+        return _keccakToField(level[0]);
+    }}
+
+    function _uhf(
+        uint256 seed,
+        uint256[] calldata values
+    ) private pure returns (uint256 acc) {{
+        uint256 power = 1;
+        for (uint256 i = 0; i < values.length; ++i) {{
+            acc = addmod(acc, mulmod(power, values[i], FIELD_MODULUS), FIELD_MODULUS);
+            power = mulmod(power, seed, FIELD_MODULUS);
+        }}
     }}
 
     function _checkLimbRange(uint256 limb, uint256 idx) private pure {{
@@ -1557,15 +1593,26 @@ contract ShieldedPoolStatefulVerifier {{
             _checkFinalAccumulatorPairing(finalAccumulatorPi);
         if (!pairingCallOk) revert InvalidAccumulatorPairingResult(pairingResult);
         if (pairingResult != 1) revert InvalidAccumulatorPairingResult(pairingResult);
+
         uint256 proofSubroot = _extractSubrootFromProofPublicInputs(verifierCalldata);
-        uint256 subroot = _recomputeSubrootFromMetadata(l2BlockMetadata);
-        // if (subroot != proofSubroot) revert InvalidTransition(13);
+        // alpha = Keccak(metadata) committed by the proof.
+        uint256 proofMetadataHash =
+            _extractMetadataHashFromProofPublicInputs(verifierCalldata);
+        // gamma = UHF(alpha + beta, metadata), where beta is proofSubroot.
+        uint256 proofHybridGamma =
+            _extractHybridGammaFromProofPublicInputs(verifierCalldata);
+
+        uint256 metadataHash = _recomputeSubrootFromMetadata(l2BlockMetadata);
+        if (metadataHash != proofMetadataHash) revert InvalidTransition(13);
+        uint256 hybridSeed = addmod(metadataHash, proofSubroot, FIELD_MODULUS);
+        uint256 hybridGamma = _uhf(hybridSeed, l2BlockMetadata);
+        if (hybridGamma != proofHybridGamma) revert InvalidTransition(14);
 
         commitmentRoot = cPost;
         nullifierRoot = nPost;
         rootsSetRoot = postRootsSetRoot;
         blockHead = blkPost;
-        lastSubroot = subroot;
+        lastSubroot = proofSubroot;
         emit ValidationApplied(
             "Validation successful",
             blkPost,
@@ -1574,7 +1621,7 @@ contract ShieldedPoolStatefulVerifier {{
             cPost,
             nPost,
             postRootsSetRoot,
-            subroot
+            proofSubroot
         );
         return true;
     }}
@@ -2117,6 +2164,18 @@ fn l2_metadata_merkle_hash(metadata: &[F]) -> Result<F, AppError> {
     reduced_le.resize(repr_len, 0);
     repr.as_mut().copy_from_slice(&reduced_le[..repr_len]);
     Option::from(F::from_repr(repr)).ok_or(AppError::ScalarToField)
+}
+
+/// Universal hash function from the hybrid-compression construction.
+/// Evaluates: sum_i values[i] * seed^i.
+fn uhf_eval(seed: F, values: &[F]) -> F {
+    let mut power = F::ONE;
+    let mut acc = F::ZERO;
+    for value in values {
+        acc += power * *value;
+        power *= seed;
+    }
+    acc
 }
 
 /// A note is spendable if it is unspent and confirmed at or before `latest_confirmed_root_idx`.
@@ -2770,6 +2829,9 @@ fn run() -> Result<(), AppError> {
 
     // Cache final aggregation vk/pk once (depends only on cached agg_setup for this batch size).
     let final_agg_srs = load_srs(agg_k).map_err(|e| AppError::TrustedSetup(err_string(e)))?;
+    let l2_block_metadata_len = batch_size
+        .checked_mul(rollup_ivc_circuits::CLIENT_ITEMS_WIDTH)
+        .ok_or_else(|| AppError::ReplayGuard("l2_block_metadata length overflow".to_string()))?;
 
     let default_final_circuit = rollup_ivc_circuits::WrapStepCircuit {
         child_vk: agg_setup.child_vk(),
@@ -2788,6 +2850,7 @@ fn run() -> Result<(), AppError> {
         blk_post: Value::unknown(),
         blk_pre: Value::unknown(),
         l2_metadata_merkle_hash: Value::unknown(),
+        l2_block_metadata: vec![Value::unknown(); l2_block_metadata_len],
     };
 
     let final_vk = keygen_vk_with_k(&final_agg_srs, &default_final_circuit, agg_k)
@@ -2995,6 +3058,16 @@ fn run() -> Result<(), AppError> {
             let l2_block_metadata =
                 client_proofs.iter().flat_map(|proof| proof.public_items).collect::<Vec<_>>();
             let l2_metadata_merkle_hash = l2_metadata_merkle_hash(&l2_block_metadata)?;
+            if l2_block_metadata.len() != l2_block_metadata_len {
+                return Err(AppError::ReplayGuard(format!(
+                    "invalid l2_block_metadata length: got {}, expected {}",
+                    l2_block_metadata.len(),
+                    l2_block_metadata_len
+                )));
+            }
+            // Single-shot hybrid binding value from alpha (Keccak root) and beta (Poseidon subroot).
+            let hybrid_uhf_gamma =
+                uhf_eval(l2_metadata_merkle_hash + agg_result.root_state.subroot, &l2_block_metadata);
 
             let final_circuit = rollup_ivc_circuits::WrapStepCircuit {
                 child_vk: agg_result.child_vk.clone(),
@@ -3013,6 +3086,11 @@ fn run() -> Result<(), AppError> {
                 blk_pre: Value::known(blk_pre_f),
                 blk_post: Value::known(blk_post_f),
                 l2_metadata_merkle_hash: Value::known(l2_metadata_merkle_hash),
+                l2_block_metadata: l2_block_metadata
+                    .iter()
+                    .copied()
+                    .map(Value::known)
+                    .collect(),
             };
 
             let mut final_public_inputs: Vec<F> = vec![
@@ -3030,6 +3108,8 @@ fn run() -> Result<(), AppError> {
                 post_roots_set_root,
                 // L2 block metadata Merkle hash (public)
                 l2_metadata_merkle_hash,
+                // Hybrid compression check value gamma = UHF(alpha + beta, metadata)
+                hybrid_uhf_gamma,
             ];
             final_public_inputs.extend(final_acc_pi.clone());
 
