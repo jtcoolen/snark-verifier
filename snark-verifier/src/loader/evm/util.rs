@@ -154,11 +154,21 @@ fn compile_solidity_with_args(code: &str, args: &[&str], label: &str) -> Vec<u8>
     }
     let stdout = output.stdout;
     let stderr = output.stderr;
-    let binary = *split_by_ascii_whitespace(&stdout).last().unwrap_or_else(|| {
-        panic!("{label} produced no bytecode output; stderr: {}", String::from_utf8_lossy(&stderr))
+    let binary = extract_solc_binary(&stdout).unwrap_or_else(|| {
+        panic!(
+            "{label} produced no bytecode output; stdout: {}; stderr: {}",
+            String::from_utf8_lossy(&stdout),
+            String::from_utf8_lossy(&stderr)
+        )
     });
-    assert!(!binary.is_empty());
-    hex::decode(binary).unwrap()
+    hex::decode(binary).unwrap_or_else(|err| {
+        panic!(
+            "{label} produced invalid bytecode token {:?}: {err}; stdout: {}; stderr: {}",
+            String::from_utf8_lossy(binary),
+            String::from_utf8_lossy(&stdout),
+            String::from_utf8_lossy(&stderr)
+        )
+    })
 }
 
 fn split_by_ascii_whitespace(bytes: &[u8]) -> Vec<&[u8]> {
@@ -179,6 +189,14 @@ fn split_by_ascii_whitespace(bytes: &[u8]) -> Vec<&[u8]> {
     split
 }
 
+fn extract_solc_binary(stdout: &[u8]) -> Option<&[u8]> {
+    split_by_ascii_whitespace(stdout).into_iter().rev().find(|token| {
+        !token.is_empty()
+            && token.len() % 2 == 0
+            && token.iter().all(|byte| byte.is_ascii_hexdigit())
+    })
+}
+
 #[test]
 fn test_split_by_ascii_whitespace_1() {
     let bytes = b" \x01 \x02   \x03";
@@ -191,4 +209,17 @@ fn test_split_by_ascii_whitespace_2() {
     let bytes = b"123456789abc";
     let split = split_by_ascii_whitespace(bytes);
     assert_eq!(split, [b"123456789abc"]);
+}
+
+#[test]
+fn test_extract_solc_binary_skips_empty_abstract_binary() {
+    let stdout = br#"
+======= <stdin>:AAA =======
+Binary:
+6080
+
+======= <stdin>:ZZZ =======
+Binary:
+"#;
+    assert_eq!(extract_solc_binary(stdout), Some(&b"6080"[..]));
 }
