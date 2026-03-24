@@ -39,7 +39,7 @@ use revm::{
     context::TxEnv,
     context_interface::result::{ExecutionResult, Output},
     database::InMemoryDB,
-    primitives::{hardfork::SpecId, Address, Bytes, TxKind},
+    primitives::{hardfork::SpecId, Address, Bytes, Log, TxKind},
     Context, ExecuteCommitEvm, MainBuilder, MainContext, MainnetEvm,
 };
 #[cfg(feature = "evm-bench")]
@@ -199,6 +199,97 @@ struct FinalWrapStatefulLoopCache {
 #[cfg(feature = "evm-bench")]
 thread_local! {
     static FINAL_WRAP_STATEFUL_LOOP_CACHE: RefCell<Option<FinalWrapStatefulLoopCache>> = RefCell::new(None);
+}
+
+#[cfg(feature = "evm-bench")]
+fn abi_word(data: &[u8], idx: usize) -> Option<&[u8]> {
+    let start = idx.checked_mul(32)?;
+    let end = start.checked_add(32)?;
+    data.get(start..end)
+}
+
+#[cfg(feature = "evm-bench")]
+fn abi_word_to_usize(word: &[u8]) -> Option<usize> {
+    if word.len() != 32 {
+        return None;
+    }
+    if word[..24].iter().any(|byte| *byte != 0) {
+        return None;
+    }
+    let mut be = [0u8; 8];
+    be.copy_from_slice(&word[24..]);
+    usize::try_from(u64::from_be_bytes(be)).ok()
+}
+
+#[cfg(feature = "evm-bench")]
+fn abi_word_to_decimal(word: &[u8]) -> String {
+    BigUint::from_bytes_be(word).to_string()
+}
+
+#[cfg(feature = "evm-bench")]
+fn decode_validation_applied(log: &Log) -> Option<String> {
+    let topics = log.data.topics();
+    if topics.len() < 2 {
+        return None;
+    }
+    let signature_hash: [u8; 32] =
+        Keccak256::digest(b"ValidationApplied(string,uint256,uint256,uint256,uint256,uint256,uint256,uint256)")
+            .into();
+    if topics[0].as_slice() != signature_hash {
+        return None;
+    }
+
+    let data = log.data.data.as_ref();
+    let message_offset = abi_word_to_usize(abi_word(data, 0)?)?;
+    let message_len_word = data.get(message_offset..message_offset.checked_add(32)?)?;
+    let message_len = abi_word_to_usize(message_len_word)?;
+    let message_start = message_offset.checked_add(32)?;
+    let message_end = message_start.checked_add(message_len)?;
+    let message_bytes = data.get(message_start..message_end)?;
+    let message = String::from_utf8_lossy(message_bytes);
+
+    Some(format!(
+        "ValidationApplied {{ l2_block_number: {}, blk_pre: {}, blk_post: {}, commitment_root: {}, nullifier_root: {}, roots_set_root: {}, subroot: {}, message: \"{}\" }}",
+        abi_word_to_decimal(topics[1].as_slice()),
+        abi_word_to_decimal(abi_word(data, 1)?),
+        abi_word_to_decimal(abi_word(data, 2)?),
+        abi_word_to_decimal(abi_word(data, 3)?),
+        abi_word_to_decimal(abi_word(data, 4)?),
+        abi_word_to_decimal(abi_word(data, 5)?),
+        abi_word_to_decimal(abi_word(data, 6)?),
+        message
+    ))
+}
+
+#[cfg(feature = "evm-bench")]
+fn format_revm_log_pretty(log: &Log) -> String {
+    if let Some(decoded) = decode_validation_applied(log) {
+        return format!("address={} event={decoded}", log.address);
+    }
+
+    let topics = log
+        .data
+        .topics()
+        .iter()
+        .map(|topic| format!("0x{}", hex::encode(topic.as_slice())))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let data_hex = format!("0x{}", hex::encode(log.data.data.as_ref()));
+    format!("address={} topics=[{}] data={}", log.address, topics, data_hex)
+}
+
+#[cfg(feature = "evm-bench")]
+fn maybe_print_revm_logs(label: &str, logs: &[Log]) {
+    if !env_flag("SHIELDED_POOL_EVM_PRINT_LOGS") {
+        return;
+    }
+    if logs.is_empty() {
+        println!("{label} emitted no logs");
+        return;
+    }
+    for (idx, log) in logs.iter().enumerate() {
+        println!("{label} log[{idx}]: {}", format_revm_log_pretty(log));
+    }
 }
 
 #[cfg(feature = "evm-bench")]
@@ -1777,9 +1868,15 @@ contract ShieldedPoolStatefulVerifier {{
                         ))
                     })?;
                     let gas_used = match direct_result {
-                        ExecutionResult::Success { gas_used, .. } => {
+                        ExecutionResult::Success { gas_used, logs, .. } => {
                             println!(
                                 "revm stateful-loop direct verifier batch {batch_idx} success=true gas: {gas_used}"
+                            );
+                            maybe_print_revm_logs(
+                                &format!(
+                                    "revm stateful-loop direct verifier batch {batch_idx}"
+                                ),
+                                &logs,
                             );
                             gas_used
                         }
@@ -1823,10 +1920,14 @@ contract ShieldedPoolStatefulVerifier {{
                     AppError::EvmBench(format!("revm stateful loop call error: {err}"))
                 })?;
                 match result {
-                    ExecutionResult::Success { gas_used, .. } => {
+                    ExecutionResult::Success { gas_used, logs, .. } => {
                         cache.call_gas_total = cache.call_gas_total.saturating_add(gas_used);
                         println!(
                             "revm stateful-loop batch {batch_idx} verify+update success=true gas: {gas_used}"
+                        );
+                        maybe_print_revm_logs(
+                            &format!("revm stateful-loop batch {batch_idx} verify+update"),
+                            &logs,
                         );
                         cache.call_gas_per_batch.push(json!({
                             "batch_index": batch_idx,
@@ -2559,23 +2660,38 @@ fn run() -> Result<(), AppError> {
     let batch_size = env_usize_or("SHIELDED_POOL_BATCH_SIZE", DEFAULT_BATCH_SIZE);
     let target_rollup_transitions =
         env_usize_or("SHIELDED_POOL_ROLLUP_TRANSITIONS", DEFAULT_ROLLUP_TRANSITIONS);
+    let infinite_rollup_loop = env_flag("SHIELDED_POOL_INFINITE_LOOP");
     if !batch_size.is_power_of_two() {
         return Err(AppError::ReplayGuard(format!(
             "batch size must be a power of two, got {}",
             batch_size
         )));
     }
-    let default_num_transfers = batch_size
-        .checked_mul(target_rollup_transitions)
-        .ok_or_else(|| AppError::ReplayGuard("num_transfers overflow".to_string()))?;
-    let num_transfers = env_usize_or("SHIELDED_POOL_NUM_TRANSFERS", default_num_transfers);
-    if num_transfers % batch_size != 0 {
-        return Err(AppError::ReplayGuard(format!(
-            "num_transfers must be a multiple of batch_size; got num_transfers={} batch_size={}",
-            num_transfers, batch_size
-        )));
-    }
-    let planned_rollup_transitions = num_transfers / batch_size;
+    let num_transfers = if infinite_rollup_loop {
+        if env_usize("SHIELDED_POOL_NUM_TRANSFERS").is_some() {
+            println!(
+                "SHIELDED_POOL_INFINITE_LOOP=1 set; ignoring SHIELDED_POOL_NUM_TRANSFERS and running until interrupted."
+            );
+        }
+        usize::MAX
+    } else {
+        let default_num_transfers = batch_size
+            .checked_mul(target_rollup_transitions)
+            .ok_or_else(|| AppError::ReplayGuard("num_transfers overflow".to_string()))?;
+        let configured_num_transfers = env_usize_or("SHIELDED_POOL_NUM_TRANSFERS", default_num_transfers);
+        if configured_num_transfers % batch_size != 0 {
+            return Err(AppError::ReplayGuard(format!(
+                "num_transfers must be a multiple of batch_size; got num_transfers={} batch_size={}",
+                configured_num_transfers, batch_size
+            )));
+        }
+        configured_num_transfers
+    };
+    let planned_rollup_transitions = if infinite_rollup_loop {
+        None
+    } else {
+        Some(num_transfers / batch_size)
+    };
     let run_evm_bench = env_flag("SHIELDED_POOL_EVM_BENCH");
     #[cfg(feature = "evm-bench")]
     let target_batch = env_usize("SHIELDED_POOL_EVM_BENCH_BATCH");
@@ -2619,6 +2735,11 @@ fn run() -> Result<(), AppError> {
         );
     }
 
+    let transfers_label =
+        if infinite_rollup_loop { "infinite".to_string() } else { num_transfers.to_string() };
+    let planned_rollup_transitions_label = planned_rollup_transitions
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "infinite".to_string());
     println!(
         "config: k={} agg_k={} use_mock_srs={} accounts={} seed_deposits_per_account={} transfers={} batch_size={} planned_rollup_transitions={}",
         k,
@@ -2626,9 +2747,9 @@ fn run() -> Result<(), AppError> {
         use_mock_srs,
         num_accounts,
         num_seed_deposits_per_account,
-        num_transfers,
+        transfers_label,
         batch_size,
-        planned_rollup_transitions
+        planned_rollup_transitions_label
     );
 
     // --- Setup leaf circuit keys ---
@@ -2700,7 +2821,7 @@ fn run() -> Result<(), AppError> {
     #[cfg(feature = "evm-bench")]
     let mut evm_transition_samples: Vec<RollupTransitionBenchSample> = Vec::new();
 
-    while total_transfers_done < num_transfers {
+    while infinite_rollup_loop || total_transfers_done < num_transfers {
         let pre = snapshot_batch_pre_state(&chain);
 
         // Compute this batch's block transition.
@@ -2778,7 +2899,9 @@ fn run() -> Result<(), AppError> {
                 shadow_commitment_map.succinct_repr()
             );
 
-            total_transfers_done += 1;
+            total_transfers_done = total_transfers_done
+                .checked_add(1)
+                .ok_or_else(|| AppError::ReplayGuard("total_transfers_done overflow".to_string()))?;
         }
 
         if batch_failed || client_proofs.is_empty() {
@@ -3067,7 +3190,8 @@ fn run() -> Result<(), AppError> {
             );
         }
 
-        batch_idx += 1;
+        batch_idx =
+            batch_idx.checked_add(1).ok_or_else(|| AppError::ReplayGuard("batch_idx overflow".to_string()))?;
     }
 
     if !final_wrap_proof_gen_times.is_empty() {
@@ -3086,7 +3210,13 @@ fn run() -> Result<(), AppError> {
             max_proof_time
         );
     }
-    println!("rollup transitions completed: {} (target {})", batch_idx, planned_rollup_transitions);
+    println!(
+        "rollup transitions completed: {} (target {})",
+        batch_idx,
+        planned_rollup_transitions
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "infinite".to_string())
+    );
 
     #[cfg(feature = "evm-bench")]
     {
