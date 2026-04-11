@@ -122,8 +122,14 @@ mod tests {
     use midnight_curves::Bls12;
     use midnight_proofs::{
         circuit::{Layouter, Value},
-        plonk::Error,
-        poly::kzg::params::ParamsKZG,
+        plonk::{Error, VerifierAlgebraicTrace},
+        poly::{
+            commitment::Guard,
+            kzg::{params::ParamsKZG, KZGCommitmentScheme},
+        },
+        transcript::{
+            CircuitTranscript, Hashable as MidnightHashable, Transcript as MidnightTranscript,
+        },
     };
     use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
     use rand::{rngs::OsRng, SeedableRng};
@@ -131,10 +137,12 @@ mod tests {
     use sha3::Digest;
     use snark_verifier::{
         loader::{evm::U256, native::NativeLoader},
+        pcs::kzg::LimbsEncoding,
         util::{
             arithmetic::{Coordinates, CurveAffine as SvCurveAffine},
             transcript::{Transcript as SvTranscript, TranscriptRead as SvTranscriptRead},
         },
+        verifier::{plonk::PlonkProof, SnarkVerifier},
     };
 
     mod midnight_evm_transcript {
@@ -492,6 +500,7 @@ mod tests {
     use midnight_evm_transcript::MidnightEvmHash;
 
     type F = midnight_curves::Fq;
+    type MidnightVerifierTrace = VerifierAlgebraicTrace<F, KZGCommitmentScheme<Bls12>>;
 
     #[derive(Clone, Debug, PartialEq, Eq)]
     enum FsTraceEvent {
@@ -677,10 +686,178 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Debug)]
+    struct RustVerifierVariables {
+        challenges: Vec<Vec<u8>>,
+        z: Vec<u8>,
+        evaluations: Vec<Vec<u8>>,
+    }
+
+    fn midnight_scalar_to_evm_bytes(value: &F) -> Vec<u8> {
+        <F as MidnightHashable<MidnightEvmHash>>::to_input(value)
+    }
+
+    fn collect_midnight_verifier_trace<const REPEATS: usize>(
+        params_verifier: &midnight_proofs::poly::kzg::params::ParamsVerifierKZG<Bls12>,
+        vk: &midnight_zk_stdlib::MidnightVK,
+        instance: &F,
+        proof: &[u8],
+    ) -> Result<(MidnightVerifierTrace, Vec<FsTraceEvent>)> {
+        let pi = PoseidonExample::<REPEATS>::format_instance(instance)?;
+        let committed = [midnight_curves::G1Projective::default()];
+        let committed_batch = [committed.as_slice()];
+        let pi_columns = [pi.as_slice()];
+        let instance_batch = [pi_columns.as_slice()];
+
+        midnight_evm_transcript::reset_trace_events();
+        let mut transcript =
+            CircuitTranscript::<midnight_evm_transcript::TracingMidnightEvmHash>::init_from_bytes(
+                proof,
+            );
+        let (guard, trace) = midnight_proofs::plonk::prepare_with_trace::<
+            F,
+            KZGCommitmentScheme<Bls12>,
+            _,
+        >(vk.vk(), &committed_batch, &instance_batch, &mut transcript)?;
+        transcript.assert_empty().map_err(|_| Error::Opening)?;
+        guard.verify(params_verifier).map_err(|_| Error::Opening)?;
+
+        let midnight_trace = midnight_evm_transcript::take_trace_events()
+            .into_iter()
+            .map(convert_midnight_trace_event)
+            .collect::<Vec<_>>();
+
+        Ok((trace, midnight_trace))
+    }
+
+    fn collect_rust_verifier_variables_and_trace(
+        bundle: &MidnightProofBundle,
+    ) -> Result<(RustVerifierVariables, Vec<FsTraceEvent>)> {
+        let dk = bundle.snark_deciding_key()?;
+        let protocol = bundle.to_snark_protocol()?;
+        let instances = bundle.full_instances_as_halo_fr()?;
+        let committed_instances = bundle.committed_instances_as_halo_points()?;
+        let committed_instances = (!committed_instances.is_empty()).then_some(committed_instances);
+        let mut transcript = TracingNativeTranscript::new(bundle.proof.as_slice());
+        let svk = dk.svk();
+
+        let proof =
+            PlonkProof::<HaloG1Affine, NativeLoader, super::super::HaloAs>::read_with_committed_instances::<
+            _,
+            LimbsEncoding<{ crate::LIMBS }, { crate::BITS }>,
+        >(&svk, &protocol, &instances, committed_instances.as_deref(), &mut transcript)
+        .map_err(|e| anyhow!("failed to parse Midnight proof with native EVM transcript: {e:?}"))?;
+
+        <crate::PlonkVerifier<super::super::HaloAs> as SnarkVerifier<
+            HaloG1Affine,
+            NativeLoader,
+        >>::verify(&dk, &protocol, &instances, &proof)
+        .map_err(|e| anyhow!("failed to verify Midnight proof with native EVM transcript: {e:?}"))?;
+
+        let vars = RustVerifierVariables {
+            challenges: proof.challenges.iter().map(encode_halo_scalar_to_evm_bytes).collect(),
+            z: encode_halo_scalar_to_evm_bytes(&proof.z),
+            evaluations: proof.evaluations.iter().map(encode_halo_scalar_to_evm_bytes).collect(),
+        };
+
+        Ok((vars, transcript.into_trace()))
+    }
+
+    fn expected_midnight_evaluation_stream(trace: &MidnightVerifierTrace) -> Vec<Vec<u8>> {
+        let mut out = Vec::new();
+        for proof_instance_evals in trace.instance_evals.iter() {
+            for (query_idx, eval) in proof_instance_evals.iter().enumerate() {
+                if trace.instance_query_columns[query_idx] < trace.nb_committed_instances {
+                    out.push(midnight_scalar_to_evm_bytes(eval));
+                }
+            }
+        }
+        out.extend(
+            trace
+                .advice_evals
+                .iter()
+                .flat_map(|evals| evals.iter().map(midnight_scalar_to_evm_bytes)),
+        );
+        out.extend(trace.fixed_evals.iter().map(midnight_scalar_to_evm_bytes));
+        out.push(midnight_scalar_to_evm_bytes(&trace.vanishing_evaluated.random_eval));
+        out.extend(
+            trace.permutations_common.permutation_evals.iter().map(midnight_scalar_to_evm_bytes),
+        );
+        out.extend(trace.permutations_evaluated.iter().flat_map(|evaluated| {
+            evaluated.sets.iter().flat_map(|set| {
+                let mut set_values = vec![
+                    midnight_scalar_to_evm_bytes(&set.permutation_product_eval),
+                    midnight_scalar_to_evm_bytes(&set.permutation_product_next_eval),
+                ];
+                if let Some(last_eval) = set.permutation_product_last_eval {
+                    set_values.push(midnight_scalar_to_evm_bytes(&last_eval));
+                }
+                set_values
+            })
+        }));
+        out.extend(trace.lookups_evaluated.iter().flat_map(|lookups| {
+            lookups.iter().flat_map(|lookup| {
+                [
+                    midnight_scalar_to_evm_bytes(&lookup.product_eval),
+                    midnight_scalar_to_evm_bytes(&lookup.product_next_eval),
+                    midnight_scalar_to_evm_bytes(&lookup.permuted_input_eval),
+                    midnight_scalar_to_evm_bytes(&lookup.permuted_input_inv_eval),
+                    midnight_scalar_to_evm_bytes(&lookup.permuted_table_eval),
+                ]
+            })
+        }));
+        out.extend(trace.trashcans_evaluated.iter().flat_map(|trashcans| {
+            trashcans.iter().map(|trash| midnight_scalar_to_evm_bytes(&trash.trash_eval))
+        }));
+        out
+    }
+
+    fn assert_full_midnight_trace_matches_snark_variables(
+        trace: &MidnightVerifierTrace,
+        rust: &RustVerifierVariables,
+        repeats: usize,
+        k: u32,
+        seed: u64,
+    ) -> Result<()> {
+        let midnight_challenges = trace
+            .parsed_trace
+            .challenges
+            .iter()
+            .map(midnight_scalar_to_evm_bytes)
+            .chain([
+                midnight_scalar_to_evm_bytes(&trace.parsed_trace.theta),
+                midnight_scalar_to_evm_bytes(&trace.parsed_trace.beta),
+                midnight_scalar_to_evm_bytes(&trace.parsed_trace.gamma),
+                midnight_scalar_to_evm_bytes(&trace.parsed_trace.trash_challenge),
+                midnight_scalar_to_evm_bytes(&trace.parsed_trace.y),
+            ])
+            .collect::<Vec<_>>();
+        if rust.challenges != midnight_challenges {
+            return Err(anyhow!(
+                "challenge sequence diverged between midnight and snark-verifier traces (repeats={repeats}, k={k}, seed={seed})"
+            ));
+        }
+
+        if rust.z != midnight_scalar_to_evm_bytes(&trace.x) {
+            return Err(anyhow!(
+                "opening challenge diverged between midnight and snark-verifier traces (repeats={repeats}, k={k}, seed={seed})"
+            ));
+        }
+
+        let midnight_evaluations = expected_midnight_evaluation_stream(trace);
+        if rust.evaluations != midnight_evaluations {
+            return Err(anyhow!(
+                "evaluation stream diverged between midnight and snark-verifier traces (repeats={repeats}, k={k}, seed={seed})"
+            ));
+        }
+
+        Ok(())
+    }
+
     fn build_poseidon_bundle<const REPEATS: usize>(
         k: u32,
         seed: u64,
-    ) -> Result<(MidnightProofBundle, Vec<FsTraceEvent>)> {
+    ) -> Result<(MidnightProofBundle, Vec<FsTraceEvent>, MidnightVerifierTrace)> {
         let srs = ParamsKZG::<Bls12>::unsafe_setup(k, OsRng);
         let relation = PoseidonExample::<REPEATS>;
         let vk = midnight_zk_stdlib::setup_vk(&srs, &relation);
@@ -701,15 +878,12 @@ mod tests {
             &proof,
         )?;
 
-        midnight_evm_transcript::reset_trace_events();
-        midnight_zk_stdlib::verify::<
-            PoseidonExample<REPEATS>,
-            midnight_evm_transcript::TracingMidnightEvmHash,
-        >(&srs.verifier_params(), &vk, &instance, None, &proof)?;
-        let midnight_trace = midnight_evm_transcript::take_trace_events()
-            .into_iter()
-            .map(convert_midnight_trace_event)
-            .collect::<Vec<_>>();
+        let (midnight_verifier_trace, midnight_trace) = collect_midnight_verifier_trace::<REPEATS>(
+            &srs.verifier_params(),
+            &vk,
+            &instance,
+            &proof,
+        )?;
 
         let bundle = MidnightProofBundle::from_vk(
             srs.verifier_params(),
@@ -719,28 +893,7 @@ mod tests {
             MidnightBundleOptions::default(),
         )?;
 
-        Ok((bundle, midnight_trace))
-    }
-
-    fn collect_rust_verifier_trace(bundle: &MidnightProofBundle) -> Result<Vec<FsTraceEvent>> {
-        let dk = bundle.snark_deciding_key()?;
-        let protocol = bundle.to_snark_protocol()?;
-        let instances = bundle.full_instances_as_halo_fr()?;
-        let committed_instances = bundle.committed_instances_as_halo_points()?;
-        let committed_instances = (!committed_instances.is_empty()).then_some(committed_instances);
-        let mut transcript = TracingNativeTranscript::new(bundle.proof.as_slice());
-
-        MidnightProofBundle::run_snark_verifier_flow(
-            &dk,
-            &protocol,
-            &instances,
-            committed_instances.as_deref(),
-            &mut transcript,
-            "failed to parse Midnight proof with native EVM transcript",
-            "failed to verify Midnight proof with native EVM transcript",
-        )?;
-
-        Ok(transcript.into_trace())
+        Ok((bundle, midnight_trace, midnight_verifier_trace))
     }
 
     fn parse_usize_literal(input: &str) -> Result<usize> {
@@ -808,13 +961,21 @@ mod tests {
     }
 
     fn run_transcript_equivalence_case<const REPEATS: usize>(k: u32, seed: u64) -> Result<()> {
-        let (bundle, midnight_trace) = build_poseidon_bundle::<REPEATS>(k, seed)?;
-        let rust_trace = collect_rust_verifier_trace(&bundle)?;
+        let (bundle, midnight_trace, midnight_verifier_trace) =
+            build_poseidon_bundle::<REPEATS>(k, seed)?;
+        let (rust_vars, rust_trace) = collect_rust_verifier_variables_and_trace(&bundle)?;
         if rust_trace != midnight_trace {
             return Err(anyhow!(
                 "midnight verifier transcript trace diverged from snark-verifier trace (repeats={REPEATS}, k={k}, seed={seed})"
             ));
         }
+        assert_full_midnight_trace_matches_snark_variables(
+            &midnight_verifier_trace,
+            &rust_vars,
+            REPEATS,
+            k,
+            seed,
+        )?;
         let rust_challenges = challenge_sequence(&rust_trace);
         if rust_challenges.len() < 8 {
             return Err(anyhow!(
