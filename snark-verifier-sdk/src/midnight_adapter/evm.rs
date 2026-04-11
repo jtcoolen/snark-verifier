@@ -128,9 +128,13 @@ mod tests {
     use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
     use rand::{rngs::OsRng, SeedableRng};
     use rand_chacha::ChaCha8Rng;
+    use sha3::Digest;
     use snark_verifier::{
         loader::{evm::U256, native::NativeLoader},
-        util::transcript::{Transcript as SvTranscript, TranscriptRead as SvTranscriptRead},
+        util::{
+            arithmetic::{Coordinates, CurveAffine as SvCurveAffine},
+            transcript::{Transcript as SvTranscript, TranscriptRead as SvTranscriptRead},
+        },
     };
 
     mod midnight_evm_transcript {
@@ -143,9 +147,36 @@ mod tests {
         use midnight_proofs::transcript::{Hashable, Sampleable, TranscriptHash};
         use num_bigint::BigUint;
         use sha3::{Digest, Keccak256};
-        use std::io::{self, Read};
+        use std::{
+            io::{self, Read},
+            sync::{Mutex, OnceLock},
+        };
 
         const EVM_ENCODED_FP_BYTES: usize = 64;
+
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub enum TranscriptEvent {
+            Absorb(Vec<u8>),
+            Squeeze { hash: [u8; 32], challenge_be: [u8; 32] },
+        }
+
+        static TRACE_EVENTS: OnceLock<Mutex<Vec<TranscriptEvent>>> = OnceLock::new();
+
+        fn trace_events() -> &'static Mutex<Vec<TranscriptEvent>> {
+            TRACE_EVENTS.get_or_init(|| Mutex::new(Vec::new()))
+        }
+
+        fn push_trace_event(event: TranscriptEvent) {
+            trace_events().lock().expect("trace mutex poisoned").push(event);
+        }
+
+        pub fn reset_trace_events() {
+            trace_events().lock().expect("trace mutex poisoned").clear();
+        }
+
+        pub fn take_trace_events() -> Vec<TranscriptEvent> {
+            std::mem::take(&mut *trace_events().lock().expect("trace mutex poisoned"))
+        }
 
         #[derive(Clone, Debug, Default)]
         pub struct MidnightEvmHash {
@@ -170,6 +201,35 @@ mod tests {
                     data.push(1);
                 }
                 let digest = Keccak256::digest(data);
+                self.state = digest.to_vec();
+                digest.to_vec()
+            }
+        }
+
+        #[derive(Clone, Debug, Default)]
+        pub struct TracingMidnightEvmHash {
+            state: Vec<u8>,
+        }
+
+        impl TranscriptHash for TracingMidnightEvmHash {
+            type Input = Vec<u8>;
+            type Output = Vec<u8>;
+
+            fn init() -> Self {
+                Self { state: Vec::new() }
+            }
+
+            fn absorb(&mut self, input: &Self::Input) {
+                push_trace_event(TranscriptEvent::Absorb(input.clone()));
+                self.state.extend_from_slice(input);
+            }
+
+            fn squeeze(&mut self) -> Self::Output {
+                let mut data = self.state.clone();
+                if data.len() == 32 {
+                    data.push(1);
+                }
+                let digest: [u8; 32] = Keccak256::digest(data).into();
                 self.state = digest.to_vec();
                 digest.to_vec()
             }
@@ -208,7 +268,113 @@ mod tests {
             }
         }
 
+        impl Sampleable<TracingMidnightEvmHash> for Fq {
+            fn sample(hash_output: Vec<u8>) -> Self {
+                assert_eq!(hash_output.len(), 32, "TracingMidnightEvmHash outputs 32 bytes");
+                let hash =
+                    <[u8; 32]>::try_from(hash_output.as_slice()).expect("32-byte hash output");
+                let value = BigUint::from_bytes_be(&hash_output);
+                let modulus =
+                    BigUint::from_bytes_le((-Fq::ONE).to_repr().as_ref()) + BigUint::from(1u8);
+                let reduced = value % modulus;
+                let mut repr = <Fq as PrimeField>::Repr::default();
+                let repr_len = repr.as_ref().len();
+                let mut reduced_le = reduced.to_bytes_le();
+                reduced_le.resize(repr_len, 0);
+                repr.as_mut().copy_from_slice(&reduced_le[..repr_len]);
+                let challenge = Fq::from_repr(repr).unwrap();
+
+                let mut challenge_be = challenge.to_repr();
+                challenge_be.as_mut().reverse();
+                push_trace_event(TranscriptEvent::Squeeze {
+                    hash,
+                    challenge_be: challenge_be
+                        .as_ref()
+                        .try_into()
+                        .expect("scalar repr must be 32 bytes"),
+                });
+                challenge
+            }
+        }
+
         impl Hashable<MidnightEvmHash> for G1Projective {
+            fn to_input(&self) -> Vec<u8> {
+                let affine = MidnightG1Affine::from(self);
+                let coordinates =
+                    match Option::<midnight_curves::Coordinates<MidnightG1Affine>>::from(
+                        affine.coordinates(),
+                    ) {
+                        Some(coordinates) => coordinates,
+                        None => {
+                            return vec![0u8; 2 * EVM_ENCODED_FP_BYTES];
+                        }
+                    };
+                let mut bytes = Vec::with_capacity(2 * EVM_ENCODED_FP_BYTES);
+                bytes.extend_from_slice(&fp_to_evm_word(coordinates.x()));
+                bytes.extend_from_slice(&fp_to_evm_word(coordinates.y()));
+                bytes
+            }
+
+            fn to_bytes(&self) -> Vec<u8> {
+                let affine = MidnightG1Affine::from(self);
+                let coordinates =
+                    match Option::<midnight_curves::Coordinates<MidnightG1Affine>>::from(
+                        affine.coordinates(),
+                    ) {
+                        Some(coordinates) => coordinates,
+                        None => {
+                            return vec![0u8; 2 * midnight_fp_num_bytes()];
+                        }
+                    };
+                let mut bytes = Vec::with_capacity(2 * midnight_fp_num_bytes());
+                bytes.extend_from_slice(&fp_to_be_bytes(coordinates.x()));
+                bytes.extend_from_slice(&fp_to_be_bytes(coordinates.y()));
+                bytes
+            }
+
+            fn read(buffer: &mut impl Read) -> io::Result<Self> {
+                let coord_bytes = midnight_fp_num_bytes();
+                let mut x_be = vec![0u8; coord_bytes];
+                let mut y_be = vec![0u8; coord_bytes];
+                buffer.read_exact(&mut x_be)?;
+                buffer.read_exact(&mut y_be)?;
+
+                let x = fp_from_be_bytes(&x_be)
+                    .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+                let y = fp_from_be_bytes(&y_be)
+                    .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))?;
+                if x == MidnightFp::ZERO && y == MidnightFp::ZERO {
+                    return Ok(G1Projective::default());
+                }
+                let affine: MidnightG1Affine = Option::from(MidnightG1Affine::from_xy(x, y))
+                    .ok_or_else(|| {
+                        io::Error::new(
+                            io::ErrorKind::Other,
+                            "Invalid BLS12-381 point encoding in proof",
+                        )
+                    })?;
+                Ok(G1Projective::from(affine))
+            }
+        }
+
+        impl Hashable<TracingMidnightEvmHash> for Fq {
+            fn to_input(&self) -> Vec<u8> {
+                scalar_to_evm_bytes(self)
+            }
+
+            fn to_bytes(&self) -> Vec<u8> {
+                scalar_to_evm_bytes(self)
+            }
+
+            fn read(buffer: &mut impl Read) -> io::Result<Self> {
+                let mut be = [0u8; 32];
+                buffer.read_exact(&mut be)?;
+                scalar_from_evm_bytes(&be)
+                    .map_err(|err| io::Error::new(io::ErrorKind::Other, err.to_string()))
+            }
+        }
+
+        impl Hashable<TracingMidnightEvmHash> for G1Projective {
             fn to_input(&self) -> Vec<u8> {
                 let affine = MidnightG1Affine::from(self);
                 let coordinates =
@@ -327,6 +493,64 @@ mod tests {
 
     type F = midnight_curves::Fq;
 
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    enum FsTraceEvent {
+        Absorb(Vec<u8>),
+        Squeeze { hash: [u8; 32], challenge: U256 },
+    }
+
+    fn challenge_sequence(trace: &[FsTraceEvent]) -> Vec<U256> {
+        trace
+            .iter()
+            .filter_map(|event| match event {
+                FsTraceEvent::Squeeze { challenge, .. } => Some(*challenge),
+                FsTraceEvent::Absorb(_) => None,
+            })
+            .collect()
+    }
+
+    fn encode_halo_scalar_to_evm_bytes(value: &HaloFr) -> Vec<u8> {
+        let mut repr = value.to_repr();
+        repr.as_mut().reverse();
+        repr.as_ref().to_vec()
+    }
+
+    fn encode_halo_point_to_evm_bytes(point: &HaloG1Affine) -> Vec<u8> {
+        if let Some(coordinates) = Option::<Coordinates<HaloG1Affine>>::from(point.coordinates()) {
+            [coordinates.x(), coordinates.y()]
+                .into_iter()
+                .flat_map(|coordinate| {
+                    let repr = coordinate.to_repr();
+                    let repr: &[u8] = repr.as_ref();
+                    let encoded_len = match repr.len() {
+                        0..=0x20 => 0x20,
+                        0x21..=0x40 => 0x40,
+                        _ => unreachable!("unsupported base-field encoding length: {}", repr.len()),
+                    };
+                    std::iter::repeat(0)
+                        .take(encoded_len - repr.len())
+                        .chain(repr.iter().rev().copied())
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        } else {
+            let repr_len =
+                std::mem::size_of::<<<HaloG1Affine as SvCurveAffine>::Base as PrimeField>::Repr>();
+            let encoded_len = match repr_len {
+                0..=0x20 => 0x20,
+                0x21..=0x40 => 0x40,
+                _ => unreachable!("unsupported base-field encoding length: {}", repr_len),
+            };
+            vec![0u8; 2 * encoded_len]
+        }
+    }
+
+    fn digest_to_challenge(hash: [u8; 32]) -> U256 {
+        U256::from_le_bytes(
+            snark_verifier::loader::evm::u256_to_fe::<HaloFr>(U256::from_be_bytes(hash)).to_repr(),
+        )
+    }
+
     #[derive(Clone, Default)]
     struct PoseidonExample<const REPEATS: usize>;
 
@@ -368,19 +592,26 @@ mod tests {
 
     struct TracingNativeTranscript<'a> {
         inner: EvmTranscript<HaloG1Affine, NativeLoader, &'a [u8], Vec<u8>>,
-        challenges: Vec<U256>,
+        state: Vec<u8>,
+        trace: Vec<FsTraceEvent>,
     }
 
     impl<'a> TracingNativeTranscript<'a> {
         fn new(proof: &'a [u8]) -> Self {
             Self {
                 inner: EvmTranscript::<HaloG1Affine, NativeLoader, _, _>::new(proof),
-                challenges: Vec::new(),
+                state: Vec::new(),
+                trace: Vec::new(),
             }
         }
 
-        fn into_challenges(self) -> Vec<U256> {
-            self.challenges
+        fn absorb(&mut self, bytes: Vec<u8>) {
+            self.state.extend_from_slice(&bytes);
+            self.trace.push(FsTraceEvent::Absorb(bytes));
+        }
+
+        fn into_trace(self) -> Vec<FsTraceEvent> {
+            self.trace
         }
     }
 
@@ -391,7 +622,19 @@ mod tests {
 
         fn squeeze_challenge(&mut self) -> HaloFr {
             let challenge = SvTranscript::squeeze_challenge(&mut self.inner);
-            self.challenges.push(U256::from_le_bytes(challenge.to_repr()));
+            let mut data = self.state.clone();
+            if data.len() == 32 {
+                data.push(1);
+            }
+            let hash: [u8; 32] = sha3::Keccak256::digest(data).into();
+            let challenge_u256 = U256::from_le_bytes(challenge.to_repr());
+            assert_eq!(
+                challenge_u256,
+                digest_to_challenge(hash),
+                "native transcript wrapper challenge diverged from recomputed hash"
+            );
+            self.trace.push(FsTraceEvent::Squeeze { hash, challenge: challenge_u256 });
+            self.state = hash.to_vec();
             challenge
         }
 
@@ -399,28 +642,45 @@ mod tests {
             &mut self,
             ec_point: &HaloG1Affine,
         ) -> Result<(), snark_verifier::Error> {
+            self.absorb(encode_halo_point_to_evm_bytes(ec_point));
             SvTranscript::common_ec_point(&mut self.inner, ec_point)
         }
 
         fn common_scalar(&mut self, scalar: &HaloFr) -> Result<(), snark_verifier::Error> {
+            self.absorb(encode_halo_scalar_to_evm_bytes(scalar));
             SvTranscript::common_scalar(&mut self.inner, scalar)
         }
     }
 
     impl<'a> SvTranscriptRead<HaloG1Affine, NativeLoader> for TracingNativeTranscript<'a> {
         fn read_scalar(&mut self) -> Result<HaloFr, snark_verifier::Error> {
-            SvTranscriptRead::read_scalar(&mut self.inner)
+            let scalar = SvTranscriptRead::read_scalar(&mut self.inner)?;
+            self.absorb(encode_halo_scalar_to_evm_bytes(&scalar));
+            Ok(scalar)
         }
 
         fn read_ec_point(&mut self) -> Result<HaloG1Affine, snark_verifier::Error> {
-            SvTranscriptRead::read_ec_point(&mut self.inner)
+            let point = SvTranscriptRead::read_ec_point(&mut self.inner)?;
+            self.absorb(encode_halo_point_to_evm_bytes(&point));
+            Ok(point)
+        }
+    }
+
+    fn convert_midnight_trace_event(
+        event: midnight_evm_transcript::TranscriptEvent,
+    ) -> FsTraceEvent {
+        match event {
+            midnight_evm_transcript::TranscriptEvent::Absorb(bytes) => FsTraceEvent::Absorb(bytes),
+            midnight_evm_transcript::TranscriptEvent::Squeeze { hash, challenge_be } => {
+                FsTraceEvent::Squeeze { hash, challenge: U256::from_be_slice(&challenge_be) }
+            }
         }
     }
 
     fn build_poseidon_bundle<const REPEATS: usize>(
         k: u32,
         seed: u64,
-    ) -> Result<MidnightProofBundle> {
+    ) -> Result<(MidnightProofBundle, Vec<FsTraceEvent>)> {
         let srs = ParamsKZG::<Bls12>::unsafe_setup(k, OsRng);
         let relation = PoseidonExample::<REPEATS>;
         let vk = midnight_zk_stdlib::setup_vk(&srs, &relation);
@@ -441,16 +701,28 @@ mod tests {
             &proof,
         )?;
 
-        MidnightProofBundle::from_vk(
+        midnight_evm_transcript::reset_trace_events();
+        midnight_zk_stdlib::verify::<
+            PoseidonExample<REPEATS>,
+            midnight_evm_transcript::TracingMidnightEvmHash,
+        >(&srs.verifier_params(), &vk, &instance, None, &proof)?;
+        let midnight_trace = midnight_evm_transcript::take_trace_events()
+            .into_iter()
+            .map(convert_midnight_trace_event)
+            .collect::<Vec<_>>();
+
+        let bundle = MidnightProofBundle::from_vk(
             srs.verifier_params(),
             vk.vk().clone(),
             proof,
             vec![vec![instance]],
             MidnightBundleOptions::default(),
-        )
+        )?;
+
+        Ok((bundle, midnight_trace))
     }
 
-    fn collect_rust_verifier_challenges(bundle: &MidnightProofBundle) -> Result<Vec<U256>> {
+    fn collect_rust_verifier_trace(bundle: &MidnightProofBundle) -> Result<Vec<FsTraceEvent>> {
         let dk = bundle.snark_deciding_key()?;
         let protocol = bundle.to_snark_protocol()?;
         let instances = bundle.full_instances_as_halo_fr()?;
@@ -468,7 +740,7 @@ mod tests {
             "failed to verify Midnight proof with native EVM transcript",
         )?;
 
-        Ok(transcript.into_challenges())
+        Ok(transcript.into_trace())
     }
 
     fn parse_usize_literal(input: &str) -> Result<usize> {
@@ -536,8 +808,14 @@ mod tests {
     }
 
     fn run_transcript_equivalence_case<const REPEATS: usize>(k: u32, seed: u64) -> Result<()> {
-        let bundle = build_poseidon_bundle::<REPEATS>(k, seed)?;
-        let rust_challenges = collect_rust_verifier_challenges(&bundle)?;
+        let (bundle, midnight_trace) = build_poseidon_bundle::<REPEATS>(k, seed)?;
+        let rust_trace = collect_rust_verifier_trace(&bundle)?;
+        if rust_trace != midnight_trace {
+            return Err(anyhow!(
+                "midnight verifier transcript trace diverged from snark-verifier trace (repeats={REPEATS}, k={k}, seed={seed})"
+            ));
+        }
+        let rust_challenges = challenge_sequence(&rust_trace);
         if rust_challenges.len() < 8 {
             return Err(anyhow!(
                 "full verifier transcript should contain a non-trivial number of challenges; got {}",
