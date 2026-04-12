@@ -907,12 +907,27 @@ mod tests {
         }
     }
 
-    fn extract_transcript_challenge_ptrs(loader: &Rc<EvmLoader>) -> Result<Vec<usize>> {
+    fn extract_transcript_challenge_ptrs_from_solidity_source(source: &str) -> Result<Vec<usize>> {
+        let mut pointers = Vec::new();
+        let marker = ", mod(hash, f_q))";
+        for line in source.lines() {
+            for segment in line.split("mstore(").skip(1) {
+                if let Some((ptr_lit, _)) = segment.split_once(marker) {
+                    pointers.push(parse_usize_literal(ptr_lit)?);
+                }
+            }
+        }
+        Ok(pointers)
+    }
+
+    fn extract_transcript_challenge_ptrs_from_runtime(
+        loader: &Rc<EvmLoader>,
+    ) -> Result<Vec<usize>> {
         let runtime_blocks = loader.code_mut().runtime_blocks().to_vec();
         let mut pointers = Vec::new();
+        let marker = ", mod(hash, f_q))";
         for block in runtime_blocks {
             for line in block.lines() {
-                let marker = ", mod(hash, f_q))";
                 if !line.contains(marker) {
                     continue;
                 }
@@ -925,6 +940,53 @@ mod tests {
         }
         if pointers.is_empty() {
             return Err(anyhow!("no transcript challenge stores found in generated EVM runtime"));
+        }
+        Ok(pointers)
+    }
+
+    fn assert_assembly_trace_ptrs_match_runtime(
+        assembly_ptrs: &[usize],
+        runtime_ptrs: &[usize],
+        backend: &str,
+    ) -> Result<()> {
+        let mut assembly = assembly_ptrs.to_vec();
+        let mut runtime = runtime_ptrs.to_vec();
+        assembly.sort_unstable();
+        runtime.sort_unstable();
+        if assembly != runtime {
+            return Err(anyhow!(
+                "{backend} Solidity assembly challenge stores do not match runtime challenge stores (assembly={}, runtime={})",
+                assembly_ptrs.len(),
+                runtime_ptrs.len()
+            ));
+        }
+        Ok(())
+    }
+
+    fn extract_transcript_challenge_ptrs_from_unrolled_solidity(
+        loader: &Rc<EvmLoader>,
+    ) -> Result<Vec<usize>> {
+        let pointers =
+            extract_transcript_challenge_ptrs_from_solidity_source(&loader.solidity_code())?;
+        if pointers.is_empty() {
+            return Err(anyhow!(
+                "no transcript challenge stores found in generated unrolled Solidity assembly"
+            ));
+        }
+        Ok(pointers)
+    }
+
+    fn extract_transcript_challenge_ptrs_from_sharded_solidity(
+        artifacts: &UnrolledShardedVerifierArtifacts,
+    ) -> Result<Vec<usize>> {
+        let mut pointers = Vec::new();
+        for source in artifacts.shard_solidity_sources.iter() {
+            pointers.extend(extract_transcript_challenge_ptrs_from_solidity_source(source)?);
+        }
+        if pointers.is_empty() {
+            return Err(anyhow!(
+                "no transcript challenge stores found in generated sharded Solidity assembly"
+            ));
         }
         Ok(pointers)
     }
@@ -950,13 +1012,36 @@ mod tests {
         Ok(())
     }
 
-    fn build_loader_with_transcript_checks(
+    fn build_loader_with_unrolled_solidity_transcript_checks(
         bundle: &MidnightProofBundle,
         rust_challenges: &[U256],
     ) -> Result<Rc<EvmLoader>> {
+        let probe_loader = bundle.build_evm_verifier_loader()?;
+        let runtime_ptrs = extract_transcript_challenge_ptrs_from_runtime(&probe_loader)?;
+        let assembly_ptrs =
+            extract_transcript_challenge_ptrs_from_unrolled_solidity(&probe_loader)?;
+        assert_assembly_trace_ptrs_match_runtime(&assembly_ptrs, &runtime_ptrs, "unrolled")?;
+
         let loader = bundle.build_evm_verifier_loader()?;
-        let challenge_ptrs = extract_transcript_challenge_ptrs(&loader)?;
-        inject_transcript_equivalence_checks(&loader, &challenge_ptrs, rust_challenges)?;
+        let runtime_ptrs_for_checks = extract_transcript_challenge_ptrs_from_runtime(&loader)?;
+        inject_transcript_equivalence_checks(&loader, &runtime_ptrs_for_checks, rust_challenges)?;
+        Ok(loader)
+    }
+
+    fn build_loader_with_sharded_solidity_transcript_checks(
+        bundle: &MidnightProofBundle,
+        rust_challenges: &[U256],
+    ) -> Result<Rc<EvmLoader>> {
+        let probe_loader = bundle.build_evm_verifier_loader()?;
+        let runtime_ptrs = extract_transcript_challenge_ptrs_from_runtime(&probe_loader)?;
+        let sharded_probe = probe_loader.unrolled_sharded_verifier_artifacts();
+        let assembly_ptrs =
+            extract_transcript_challenge_ptrs_from_sharded_solidity(&sharded_probe)?;
+        assert_assembly_trace_ptrs_match_runtime(&assembly_ptrs, &runtime_ptrs, "sharded")?;
+
+        let loader = bundle.build_evm_verifier_loader()?;
+        let runtime_ptrs_for_checks = extract_transcript_challenge_ptrs_from_runtime(&loader)?;
+        inject_transcript_equivalence_checks(&loader, &runtime_ptrs_for_checks, rust_challenges)?;
         Ok(loader)
     }
 
@@ -986,7 +1071,8 @@ mod tests {
         let calldata = bundle.encode_evm_calldata()?;
 
         // Positive: unrolled Solidity path must match full Rust transcript.
-        let loader_unrolled = build_loader_with_transcript_checks(&bundle, &rust_challenges)?;
+        let loader_unrolled =
+            build_loader_with_unrolled_solidity_transcript_checks(&bundle, &rust_challenges)?;
         let unrolled_bytecode =
             snark_verifier::loader::evm::compile_solidity(&loader_unrolled.solidity_code());
         snark_verifier::loader::evm::deploy_and_call(unrolled_bytecode, calldata.clone()).map_err(
@@ -998,7 +1084,8 @@ mod tests {
         )?;
 
         // Positive: sharded Solidity path must match full Rust transcript.
-        let loader_sharded = build_loader_with_transcript_checks(&bundle, &rust_challenges)?;
+        let loader_sharded =
+            build_loader_with_sharded_solidity_transcript_checks(&bundle, &rust_challenges)?;
         let sharded = loader_sharded.unrolled_sharded_verifier_artifacts();
         snark_verifier::loader::evm::deploy_unrolled_sharded_and_call(
             sharded.shard_deployment_codes,
@@ -1015,7 +1102,8 @@ mod tests {
         let mut bad_challenges = rust_challenges;
         bad_challenges[0] += U256::from(1u64);
 
-        let loader_bad_unrolled = build_loader_with_transcript_checks(&bundle, &bad_challenges)?;
+        let loader_bad_unrolled =
+            build_loader_with_unrolled_solidity_transcript_checks(&bundle, &bad_challenges)?;
         let bad_unrolled_bytecode =
             snark_verifier::loader::evm::compile_solidity(&loader_bad_unrolled.solidity_code());
         if snark_verifier::loader::evm::deploy_and_call(bad_unrolled_bytecode, calldata.clone())
@@ -1026,7 +1114,8 @@ mod tests {
             ));
         }
 
-        let loader_bad_sharded = build_loader_with_transcript_checks(&bundle, &bad_challenges)?;
+        let loader_bad_sharded =
+            build_loader_with_sharded_solidity_transcript_checks(&bundle, &bad_challenges)?;
         let sharded_bad = loader_bad_sharded.unrolled_sharded_verifier_artifacts();
         if snark_verifier::loader::evm::deploy_unrolled_sharded_and_call(
             sharded_bad.shard_deployment_codes,
