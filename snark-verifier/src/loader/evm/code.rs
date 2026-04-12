@@ -14,6 +14,8 @@ pub struct UnrolledShardedProgramManifest {
     pub initcode_size_limit_bytes: usize,
     /// Total number of emitted unrolled statement blocks before sharding.
     pub total_statements: usize,
+    /// Number of bytes snapshotted and handed across shard calls.
+    pub memory_snapshot_bytes: usize,
     /// Inclusive start statement index for each shard.
     pub shard_statement_start_indices: Vec<usize>,
     /// Exclusive end statement index for each shard.

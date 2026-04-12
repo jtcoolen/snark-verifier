@@ -617,8 +617,8 @@ mod tests {
 
         let artifacts = loader.unrolled_sharded_verifier_artifacts();
         assert!(
-            artifacts.dispatcher_solidity.contains("delegatecall"),
-            "dispatcher should delegatecall shard contracts"
+            artifacts.dispatcher_solidity.contains("call(gas(), shard"),
+            "dispatcher should call shard contracts"
         );
         assert!(
             !artifacts.shard_solidity_sources.is_empty(),
@@ -744,6 +744,23 @@ contract TranscriptTraceHarness {
         assert_eq!(solidity_digests, rust_digests, "buffer digests diverged");
         assert_eq!(solidity_hashes, rust_hashes, "squeeze hashes diverged");
         assert_eq!(solidity_challenges, rust_challenges, "challenge reductions diverged");
+    }
+
+    #[cfg(feature = "revm")]
+    #[test]
+    fn sharded_dispatcher_rejects_empty_shard_set() {
+        let loader = EvmLoader::new::<Fq, Fr>();
+        let mut evm_transcript = EvmTranscript::<G1Affine, Rc<EvmLoader>, _, _>::new(&loader);
+        let scalar = loader.scalar(Value::Constant(fe_to_u256(Fr::from(7u64))));
+        Transcript::common_scalar(&mut evm_transcript, &scalar).unwrap();
+        let _ = Transcript::squeeze_challenge(&mut evm_transcript);
+
+        let artifacts = loader.unrolled_sharded_verifier_artifacts();
+        assert!(
+            deploy_unrolled_sharded_and_call(vec![], artifacts.dispatcher_deployment_code, vec![])
+                .is_err(),
+            "dispatcher with no shards must reject all calls"
+        );
     }
 
     #[cfg(feature = "revm")]

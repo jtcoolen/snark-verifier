@@ -105,7 +105,17 @@ fn unrolled_shard_contract_name(index: usize) -> String {
 }
 
 /// Wraps a shard runtime-body snippet in a full deployable Solidity contract.
-fn build_unrolled_shard_solidity(contract_name: &str, scalar_modulus: U256, body: &str) -> String {
+fn build_unrolled_shard_solidity(
+    contract_name: &str,
+    scalar_modulus: U256,
+    memory_snapshot_bytes: usize,
+    body: &str,
+) -> String {
+    assert_eq!(
+        memory_snapshot_bytes % 0x20,
+        0,
+        "memory snapshot byte length must be 32-byte aligned"
+    );
     format!(
         r#"
 // SPDX-License-Identifier: MIT
@@ -119,22 +129,39 @@ contract {contract_name} {{
             if iszero(eq(data, 0x80)) {{
                 revert(0, 0)
             }}
+            if lt(calldatasize(), {memory_snapshot_bytes}) {{
+                revert(0, 0)
+            }}
+
+            let state_bytes := {memory_snapshot_bytes}
+            if state_bytes {{
+                calldatacopy(0x80, sub(calldatasize(), state_bytes), state_bytes)
+            }}
 
             let success := 1
             let f_q := {scalar_modulus}
 {body}
             mstore(0x00, success)
-            return(0x00, 0x20)
+            for {{ let i := 0 }} lt(i, state_bytes) {{ i := add(i, 0x20) }} {{
+                mstore(add(0x20, i), mload(add(0x80, i)))
+            }}
+            return(0x00, add(0x20, state_bytes))
         }}
     }}
 }}
 "#,
         scalar_modulus = hex_encode_u256(&scalar_modulus),
+        memory_snapshot_bytes = memory_snapshot_bytes,
     )
 }
 
-/// Builds the fixed dispatcher contract that delegate-calls each verifier shard.
-fn build_unrolled_dispatcher_solidity() -> String {
+/// Builds the fixed dispatcher contract that calls each verifier shard and carries memory state.
+fn build_unrolled_dispatcher_solidity(memory_snapshot_bytes: usize) -> String {
+    assert_eq!(
+        memory_snapshot_bytes % 0x20,
+        0,
+        "memory snapshot byte length must be 32-byte aligned"
+    );
     // `shards` is the first state variable and occupies storage slot 0.
     // Dynamic-array element base slot is `keccak256(abi.encode(slot))`.
     r#"
@@ -155,12 +182,21 @@ contract Halo2VerifierDispatcher {
             if iszero(eq(data, 0x80)) {
                 revert(0, 0)
             }
+            let state_bytes := __MEMORY_SNAPSHOT_BYTES__
 
             let calldata_ptr := 0x80
-            let calldata_len := calldatasize()
-            calldatacopy(calldata_ptr, 0, calldata_len)
+            let proof_len := calldatasize()
+            calldatacopy(calldata_ptr, 0, proof_len)
+            let state_ptr := add(calldata_ptr, proof_len)
+            for { let j := 0 } lt(j, state_bytes) { j := add(j, 0x20) } {
+                mstore(add(state_ptr, j), 0)
+            }
+            let payload_len := add(proof_len, state_bytes)
 
             let len := sload(0)
+            if iszero(len) {
+                revert(0, 0)
+            }
             mstore(0x00, 0)
             let base := keccak256(0x00, 0x20)
 
@@ -169,16 +205,19 @@ contract Halo2VerifierDispatcher {
                     sload(add(base, i)),
                     0x000000000000000000000000ffffffffffffffffffffffffffffffffffffffff
                 )
-                if iszero(delegatecall(gas(), shard, calldata_ptr, calldata_len, 0, 0)) {
+                if iszero(call(gas(), shard, 0, calldata_ptr, payload_len, 0, 0)) {
                     returndatacopy(0, 0, returndatasize())
                     revert(0, returndatasize())
                 }
-                if iszero(eq(returndatasize(), 0x20)) {
+                if iszero(eq(returndatasize(), add(0x20, state_bytes))) {
                     revert(0, 0)
                 }
                 returndatacopy(0, 0, 0x20)
                 if iszero(mload(0)) {
                     revert(0, 0)
+                }
+                for { let j := 0 } lt(j, state_bytes) { j := add(j, 0x20) } {
+                    returndatacopy(add(state_ptr, j), add(0x20, j), 0x20)
                 }
             }
             return(0, 0)
@@ -186,7 +225,7 @@ contract Halo2VerifierDispatcher {
     }
 }
 "#
-    .to_string()
+    .replace("__MEMORY_SNAPSHOT_BYTES__", &memory_snapshot_bytes.to_string())
 }
 
 /// Best-effort compiles Solidity source into deployment/runtime bytecode.
@@ -269,9 +308,15 @@ impl EvmLoader {
         statement_blocks: &[String],
         contract_name: &str,
         range: ShardStatementRange,
+        memory_snapshot_bytes: usize,
     ) -> (String, Option<(Vec<u8>, Vec<u8>)>) {
         let body = join_statement_blocks(statement_blocks, range.start, range.end);
-        let solidity = build_unrolled_shard_solidity(contract_name, self.scalar_modulus, &body);
+        let solidity = build_unrolled_shard_solidity(
+            contract_name,
+            self.scalar_modulus,
+            memory_snapshot_bytes,
+            &body,
+        );
         let artifacts = try_compile_solidity_sizes(&solidity);
         (solidity, artifacts)
     }
@@ -285,6 +330,7 @@ impl EvmLoader {
         statement_blocks: &[String],
         grouped_ranges: &mut Vec<ShardStatementRange>,
         cursor: usize,
+        memory_snapshot_bytes: usize,
     ) {
         loop {
             let range = grouped_ranges[cursor];
@@ -292,6 +338,7 @@ impl EvmLoader {
                 statement_blocks,
                 "Halo2VerifierShardCandidate",
                 range,
+                memory_snapshot_bytes,
             );
             match artifacts {
                 Some((deployment, runtime)) if fits_evm_code_size_limits(&deployment, &runtime) => {
@@ -326,6 +373,7 @@ impl EvmLoader {
         statement_blocks: &[String],
         grouped_ranges: &[ShardStatementRange],
         cursor: usize,
+        memory_snapshot_bytes: usize,
     ) -> usize {
         let mut lo = cursor + 1;
         let mut hi = grouped_ranges.len() + 1;
@@ -339,6 +387,7 @@ impl EvmLoader {
                 statement_blocks,
                 "Halo2VerifierShardCandidate",
                 range,
+                memory_snapshot_bytes,
             );
             let fits = artifacts
                 .as_ref()
@@ -358,14 +407,19 @@ impl EvmLoader {
         &self,
         statement_blocks: &[String],
         shards: &[ShardStatementRange],
+        memory_snapshot_bytes: usize,
     ) -> (Vec<String>, Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<usize>, Vec<usize>) {
         shards
             .iter()
             .enumerate()
             .map(|(idx, &range)| {
                 let contract_name = unrolled_shard_contract_name(idx);
-                let (solidity, artifacts) =
-                    self.compile_shard_candidate(statement_blocks, &contract_name, range);
+                let (solidity, artifacts) = self.compile_shard_candidate(
+                    statement_blocks,
+                    &contract_name,
+                    range,
+                    memory_snapshot_bytes,
+                );
                 let (deployment_code, runtime_code) = artifacts.unwrap_or_else(|| {
                     panic!(
                         "failed to compile finalized unrolled-sharded contract {contract_name} for statement range [{}..{})",
@@ -396,6 +450,12 @@ impl EvmLoader {
             !statement_blocks.is_empty(),
             "unrolled-sharded verifier generation requires at least one emitted statement block"
         );
+        let memory_snapshot_bytes = self.ptr().saturating_sub(MEM_PTR_START);
+        assert_eq!(
+            memory_snapshot_bytes % 0x20,
+            0,
+            "memory snapshot byte length must be 32-byte aligned"
+        );
 
         let total_statements = statement_blocks.len();
 
@@ -411,9 +471,18 @@ impl EvmLoader {
         let mut cursor = 0usize;
         let shards = iter::from_fn(|| {
             (cursor < grouped_ranges.len()).then(|| {
-                self.ensure_grouped_range_fits(&statement_blocks, &mut grouped_ranges, cursor);
-                let end_group =
-                    self.find_largest_fitting_group_end(&statement_blocks, &grouped_ranges, cursor);
+                self.ensure_grouped_range_fits(
+                    &statement_blocks,
+                    &mut grouped_ranges,
+                    cursor,
+                    memory_snapshot_bytes,
+                );
+                let end_group = self.find_largest_fitting_group_end(
+                    &statement_blocks,
+                    &grouped_ranges,
+                    cursor,
+                    memory_snapshot_bytes,
+                );
                 let shard = ShardStatementRange {
                     start: grouped_ranges[cursor].start,
                     end: grouped_ranges[end_group - 1].end,
@@ -430,9 +499,9 @@ impl EvmLoader {
             shard_runtime_codes,
             shard_statement_start_indices,
             shard_statement_end_indices,
-        ) = self.build_shard_artifacts(&statement_blocks, &shards);
+        ) = self.build_shard_artifacts(&statement_blocks, &shards, memory_snapshot_bytes);
 
-        let dispatcher_solidity = build_unrolled_dispatcher_solidity();
+        let dispatcher_solidity = build_unrolled_dispatcher_solidity(memory_snapshot_bytes);
         let (dispatcher_deployment_code, dispatcher_runtime_code) =
             try_compile_solidity_sizes(&dispatcher_solidity)
                 .expect("failed to compile unrolled-sharded dispatcher Solidity");
@@ -447,6 +516,7 @@ impl EvmLoader {
             runtime_code_size_limit_bytes: EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES,
             initcode_size_limit_bytes: EVM_INITCODE_SIZE_LIMIT_BYTES,
             total_statements,
+            memory_snapshot_bytes,
             shard_statement_start_indices,
             shard_statement_end_indices,
             dispatcher_runtime_code_bytes: dispatcher_runtime_code.len(),
