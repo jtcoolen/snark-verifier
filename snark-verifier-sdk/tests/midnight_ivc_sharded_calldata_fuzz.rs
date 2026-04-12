@@ -40,9 +40,9 @@ use rand::{rngs::OsRng, Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use snark_verifier_sdk::{
     midnight_adapter::{MidnightBundleOptions, MidnightProofBundle},
-    snark_verifier::loader::evm::deploy_unrolled_sharded_and_call,
+    snark_verifier::loader::evm::{deploy_and_call, deploy_unrolled_sharded_and_call},
 };
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::OnceLock};
 
 #[path = "../examples/support/midnight_evm_transcript.rs"]
 mod midnight_evm_transcript;
@@ -339,38 +339,181 @@ fn build_ivc_bundle() -> MidnightProofBundle {
     .expect("bundle creation should succeed")
 }
 
-#[test]
-#[ignore = "slow: generates a full IVC proof and deploys sharded artifacts multiple times"]
-fn ivc_sharded_artifacts_reject_fuzzed_calldata() {
-    let bundle = build_ivc_bundle();
-    let artifacts = bundle
-        .generate_evm_verifier_unrolled_sharded_artifacts()
-        .expect("failed to generate IVC unrolled-sharded verifier artifacts");
-    let calldata = bundle.encode_evm_calldata().expect("failed to encode IVC calldata");
+#[derive(Clone)]
+struct IvcGeneratedArtifacts {
+    unrolled_bytecode: Vec<u8>,
+    sharded_deployments: Vec<Vec<u8>>,
+    sharded_dispatcher_deployment: Vec<u8>,
+    calldata: Vec<u8>,
+}
 
+fn ivc_generated_artifacts() -> &'static IvcGeneratedArtifacts {
+    static ARTIFACTS: OnceLock<IvcGeneratedArtifacts> = OnceLock::new();
+    ARTIFACTS.get_or_init(|| {
+        let bundle = build_ivc_bundle();
+        let sharded = bundle
+            .generate_evm_verifier_unrolled_sharded_artifacts()
+            .expect("failed to generate IVC unrolled-sharded verifier artifacts");
+        IvcGeneratedArtifacts {
+            unrolled_bytecode: bundle
+                .generate_evm_verifier_bytecode()
+                .expect("failed to generate IVC unrolled verifier bytecode"),
+            sharded_deployments: sharded.shard_deployment_codes,
+            sharded_dispatcher_deployment: sharded.dispatcher_deployment_code,
+            calldata: bundle.encode_evm_calldata().expect("failed to encode IVC calldata"),
+        }
+    })
+}
+
+fn sharded_accepts(artifacts: &IvcGeneratedArtifacts, calldata: Vec<u8>) -> bool {
     deploy_unrolled_sharded_and_call(
-        artifacts.shard_deployment_codes.clone(),
-        artifacts.dispatcher_deployment_code.clone(),
-        calldata.clone(),
+        artifacts.sharded_deployments.clone(),
+        artifacts.sharded_dispatcher_deployment.clone(),
+        calldata,
     )
-    .expect("valid IVC calldata should pass against generated sharded artifacts");
+    .is_ok()
+}
 
-    let mut rng = ChaCha8Rng::seed_from_u64(7);
-    const FUZZ_MUTATIONS: usize = 12;
-    for case_idx in 0..FUZZ_MUTATIONS {
-        let mut mutated = calldata.clone();
+fn unrolled_accepts(artifacts: &IvcGeneratedArtifacts, calldata: Vec<u8>) -> bool {
+    deploy_and_call(artifacts.unrolled_bytecode.clone(), calldata).is_ok()
+}
+
+fn fuzz_bitflip_cases(base: &[u8], seed: u64, count: usize) -> Vec<(String, Vec<u8>)> {
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let mut out = Vec::with_capacity(count);
+    for case_idx in 0..count {
+        let mut mutated = base.to_vec();
         let byte_idx = rng.gen_range(0..mutated.len());
         let bit_mask = 1u8 << rng.gen_range(0..8);
         mutated[byte_idx] ^= bit_mask;
-
-        let result = deploy_unrolled_sharded_and_call(
-            artifacts.shard_deployment_codes.clone(),
-            artifacts.dispatcher_deployment_code.clone(),
-            mutated,
-        );
-        assert!(
-            result.is_err(),
-            "mutated calldata unexpectedly verified (case={case_idx}, byte={byte_idx}, bit_mask=0x{bit_mask:02x})"
-        );
+        out.push((format!("bitflip-{case_idx}-byte-{byte_idx}-mask-{bit_mask:#04x}"), mutated));
     }
+    out
+}
+
+fn structured_rejection_cases(base: &[u8]) -> Vec<(String, Vec<u8>)> {
+    let mut cases = Vec::new();
+
+    let mut zeroed = base.to_vec();
+    zeroed.fill(0);
+    cases.push(("all-zero".to_string(), zeroed));
+
+    let mut first_word_zeroed = base.to_vec();
+    let first_word_len = first_word_zeroed.len().min(32);
+    first_word_zeroed[..first_word_len].fill(0);
+    cases.push(("zero-first-word".to_string(), first_word_zeroed));
+
+    let mut last_word_zeroed = base.to_vec();
+    let start = last_word_zeroed.len().saturating_sub(32);
+    last_word_zeroed[start..].fill(0);
+    cases.push(("zero-last-word".to_string(), last_word_zeroed));
+
+    if base.len() >= 64 {
+        let mut swapped = base.to_vec();
+        let (lhs, rhs) = swapped.split_at_mut(32);
+        lhs.swap_with_slice(&mut rhs[..32]);
+        cases.push(("swap-first-two-words".to_string(), swapped));
+    }
+
+    if base.len() > 1 {
+        cases.push(("truncate-by-1".to_string(), base[..base.len() - 1].to_vec()));
+    }
+    if base.len() > 64 {
+        cases.push(("truncate-half".to_string(), base[..base.len() / 2].to_vec()));
+    }
+
+    cases
+}
+
+fn structured_parity_only_cases(base: &[u8]) -> Vec<(String, Vec<u8>)> {
+    let mut cases = Vec::new();
+
+    let mut append_one = base.to_vec();
+    append_one.push(0u8);
+    cases.push(("append-one-byte".to_string(), append_one));
+
+    let mut append_word = base.to_vec();
+    append_word.extend([0u8; 32]);
+    cases.push(("append-32-bytes".to_string(), append_word));
+
+    cases
+}
+
+#[test]
+#[ignore = "slow: generates full IVC artifacts and performs mutation checks via revm deployments"]
+fn ivc_sharded_artifacts_reject_fuzzed_and_structured_calldata() {
+    let artifacts = ivc_generated_artifacts();
+
+    assert!(
+        sharded_accepts(artifacts, artifacts.calldata.clone()),
+        "valid IVC calldata should pass against generated sharded artifacts"
+    );
+
+    let mut cases = fuzz_bitflip_cases(&artifacts.calldata, 7, 16);
+    cases.extend(structured_rejection_cases(&artifacts.calldata));
+
+    for (name, payload) in cases {
+        let accepted = sharded_accepts(artifacts, payload);
+        assert!(!accepted, "mutated calldata unexpectedly verified for case={name}");
+    }
+}
+
+#[test]
+#[ignore = "slow: generates full IVC artifacts and checks unrolled vs sharded verdict parity"]
+fn ivc_unrolled_and_sharded_verdicts_match_on_mutation_corpus() {
+    let artifacts = ivc_generated_artifacts();
+
+    assert!(
+        unrolled_accepts(artifacts, artifacts.calldata.clone()),
+        "valid IVC calldata should pass against generated unrolled artifacts"
+    );
+    assert!(
+        sharded_accepts(artifacts, artifacts.calldata.clone()),
+        "valid IVC calldata should pass against generated sharded artifacts"
+    );
+
+    let mut cases = vec![("valid".to_string(), artifacts.calldata.clone())];
+    cases.extend(fuzz_bitflip_cases(&artifacts.calldata, 11, 8));
+    cases.extend(structured_rejection_cases(&artifacts.calldata));
+    cases.extend(structured_parity_only_cases(&artifacts.calldata));
+
+    for (name, payload) in cases {
+        let unrolled_ok = unrolled_accepts(artifacts, payload.clone());
+        let sharded_ok = sharded_accepts(artifacts, payload);
+        assert_eq!(unrolled_ok, sharded_ok, "unrolled/sharded verdict mismatch for case={name}");
+    }
+}
+
+#[test]
+#[ignore = "slow: generates full IVC artifacts and validates bytecode tampering fails"]
+fn ivc_sharded_artifacts_fail_when_bytecode_is_tampered() {
+    let artifacts = ivc_generated_artifacts();
+
+    let mut mutated_shard_deployments = artifacts.sharded_deployments.clone();
+    let first =
+        mutated_shard_deployments.first_mut().expect("at least one shard deployment must exist");
+    assert!(first.len() > 2, "first shard deployment should be non-trivial");
+    first.truncate(first.len() / 2);
+    assert!(
+        deploy_unrolled_sharded_and_call(
+            mutated_shard_deployments,
+            artifacts.sharded_dispatcher_deployment.clone(),
+            artifacts.calldata.clone(),
+        )
+        .is_err(),
+        "mutated shard deployment should not verify valid IVC calldata"
+    );
+
+    let mut mutated_dispatcher = artifacts.sharded_dispatcher_deployment.clone();
+    assert!(mutated_dispatcher.len() > 2, "dispatcher deployment bytecode should be non-trivial");
+    mutated_dispatcher.truncate(mutated_dispatcher.len() / 2);
+    assert!(
+        deploy_unrolled_sharded_and_call(
+            artifacts.sharded_deployments.clone(),
+            mutated_dispatcher,
+            artifacts.calldata.clone(),
+        )
+        .is_err(),
+        "mutated dispatcher deployment should not verify valid IVC calldata"
+    );
 }
