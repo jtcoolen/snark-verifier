@@ -29,6 +29,7 @@ pub struct EvmTranscript<C: CurveAffine, L: Loader<C>, S, B> {
     loader: L,
     stream: S,
     buf: B,
+    seed_slot_active: bool,
     _marker: PhantomData<C>,
 }
 
@@ -43,7 +44,13 @@ where
         let ptr = loader.allocate(0x20);
         let mut buf = MemoryChunk::new(ptr);
         buf.extend(0x20);
-        Self { loader: loader.clone(), stream: 0, buf, _marker: PhantomData }
+        Self {
+            loader: loader.clone(),
+            stream: 0,
+            buf,
+            seed_slot_active: true,
+            _marker: PhantomData,
+        }
     }
 
     /// Load `num_instance` instances from calldata to memory.
@@ -67,6 +74,7 @@ where
             let ptr = self.loader.allocate(0x20);
             self.buf.reset(ptr);
             self.buf.extend(0x20);
+            self.seed_slot_active = true;
         }
 
         instances
@@ -109,23 +117,47 @@ where
 
         self.buf.reset(dup_hash_ptr);
         self.buf.extend(0x20);
+        self.seed_slot_active = false;
 
         self.loader.scalar(Value::Memory(challenge_ptr))
     }
 
     fn common_ec_point(&mut self, ec_point: &EcPoint) -> Result<(), Error> {
         if let Value::Memory(ptr) = ec_point.value() {
-            if self.buf.end() == ptr {
-                self.buf.extend(self.loader.evm_ec_point_bytes());
+            let point_ptr = if self.seed_slot_active {
+                if self.buf.end() == ptr {
+                    ptr
+                } else {
+                    let dst = self.loader.dup_ec_point(ec_point);
+                    if let Value::Memory(dst_ptr) = dst.value() {
+                        dst_ptr
+                    } else {
+                        unreachable!()
+                    }
+                }
             } else {
-                // Re-copy into the contiguous transcript buffer when source memory is disjoint.
-                let dst = self.loader.dup_ec_point(ec_point);
-                if let Value::Memory(dst_ptr) = dst.value() {
-                    assert_eq!(self.buf.end(), dst_ptr);
+                if self.buf.end() == ptr {
                     self.buf.extend(self.loader.evm_ec_point_bytes());
                 } else {
-                    unreachable!()
+                    // Re-copy into the contiguous transcript buffer when source memory is disjoint.
+                    let dst = self.loader.dup_ec_point(ec_point);
+                    if let Value::Memory(dst_ptr) = dst.value() {
+                        assert_eq!(self.buf.end(), dst_ptr);
+                        self.buf.extend(self.loader.evm_ec_point_bytes());
+                    } else {
+                        unreachable!()
+                    }
                 }
+                self.seed_slot_active = false;
+                return Ok(());
+            };
+
+            if self.seed_slot_active {
+                self.buf.reset(point_ptr);
+                self.buf.extend(self.loader.evm_ec_point_bytes());
+                self.seed_slot_active = false;
+            } else {
+                unreachable!()
             }
         } else {
             unreachable!()
@@ -135,27 +167,44 @@ where
 
     fn common_scalar(&mut self, scalar: &Scalar) -> Result<(), Error> {
         match scalar.value() {
-            Value::Constant(_) if self.buf.len() == 0x20 => {
+            Value::Constant(_) if self.seed_slot_active => {
                 self.loader.copy_scalar(scalar, self.buf.ptr());
+                self.seed_slot_active = false;
             }
             Value::Constant(_) => {
                 let ptr = self.loader.allocate(0x20);
                 assert_eq!(self.buf.end(), ptr);
                 self.loader.copy_scalar(scalar, ptr);
                 self.buf.extend(0x20);
+                self.seed_slot_active = false;
             }
             Value::Memory(ptr) => {
-                if self.buf.end() == ptr {
-                    self.buf.extend(0x20);
+                if self.seed_slot_active {
+                    if self.buf.end() == ptr {
+                        self.buf.reset(ptr);
+                        self.buf.extend(0x20);
+                    } else {
+                        let dst = self.loader.allocate(0x20);
+                        self.loader
+                            .code_mut()
+                            .runtime_append(format!("mstore({dst:#x}, mload({ptr:#x}))"));
+                        self.buf.reset(dst);
+                        self.buf.extend(0x20);
+                    }
                 } else {
-                    // Re-copy into the contiguous transcript buffer when source memory is disjoint.
-                    let dst = self.loader.allocate(0x20);
-                    assert_eq!(self.buf.end(), dst);
-                    self.loader
-                        .code_mut()
-                        .runtime_append(format!("mstore({dst:#x}, mload({ptr:#x}))"));
-                    self.buf.extend(0x20);
+                    if self.buf.end() == ptr {
+                        self.buf.extend(0x20);
+                    } else {
+                        // Re-copy into the contiguous transcript buffer when source memory is disjoint.
+                        let dst = self.loader.allocate(0x20);
+                        assert_eq!(self.buf.end(), dst);
+                        self.loader
+                            .code_mut()
+                            .runtime_append(format!("mstore({dst:#x}, mload({ptr:#x}))"));
+                        self.buf.extend(0x20);
+                    }
                 }
+                self.seed_slot_active = false;
             }
             _ => unreachable!(),
         }
@@ -190,7 +239,13 @@ where
     /// Initialize [`EvmTranscript`] given readable or writeable stream for
     /// verifying or proving with [`NativeLoader`].
     pub fn new(stream: S) -> Self {
-        Self { loader: NativeLoader, stream, buf: Vec::new(), _marker: PhantomData }
+        Self {
+            loader: NativeLoader,
+            stream,
+            buf: Vec::new(),
+            seed_slot_active: false,
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -455,7 +510,90 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::halo2_proofs::halo2curves::bls12_381::G1Affine;
+    use crate::{
+        halo2_proofs::halo2curves::bls12_381::{Fq, Fr, G1Affine},
+        loader::evm::fe_to_u256,
+        loader::EcPointLoader,
+    };
+    #[cfg(feature = "revm")]
+    use crate::{
+        loader::evm::{compile_solidity, deploy_unrolled_sharded_and_call, modulus, U256},
+        util::hash::{Digest, Keccak256},
+    };
+
+    #[cfg(feature = "revm")]
+    fn deploy_and_call_with_output(deployment_code: Vec<u8>, calldata: Vec<u8>) -> Vec<u8> {
+        use revm::{
+            context::TxEnv,
+            context_interface::result::{ExecutionResult, Output},
+            database::InMemoryDB,
+            primitives::{hardfork::SpecId, Bytes, TxKind},
+            Context, ExecuteCommitEvm, MainBuilder, MainContext,
+        };
+
+        const GAS_LIMIT: u64 = 1_000_000_000;
+
+        let mut evm = Context::mainnet()
+            .modify_cfg_chained(|cfg| {
+                cfg.spec = SpecId::PRAGUE;
+                cfg.limit_contract_code_size = Some(usize::MAX);
+                cfg.limit_contract_initcode_size = Some(usize::MAX);
+                cfg.disable_nonce_check = true;
+                cfg.tx_gas_limit_cap = Some(GAS_LIMIT);
+            })
+            .with_db(InMemoryDB::default())
+            .build_mainnet();
+
+        let deployment_tx = TxEnv::builder()
+            .gas_limit(GAS_LIMIT)
+            .kind(TxKind::Create)
+            .data(Bytes::from(deployment_code))
+            .build_fill();
+        let deployment_result =
+            evm.transact_commit(deployment_tx).expect("revm deployment transaction failed");
+        let contract = match deployment_result {
+            ExecutionResult::Success { output: Output::Create(_, Some(contract)), .. } => contract,
+            ExecutionResult::Success { output, .. } => {
+                panic!("unexpected deployment output: {output:?}")
+            }
+            ExecutionResult::Revert { output, .. } => {
+                panic!("deployment reverted: 0x{}", hex::encode(output))
+            }
+            ExecutionResult::Halt { reason, .. } => panic!("deployment halted: {reason:?}"),
+        };
+
+        let call_tx = TxEnv::builder()
+            .gas_limit(GAS_LIMIT)
+            .kind(TxKind::Call(contract))
+            .data(Bytes::from(calldata))
+            .build_fill();
+        let call_result = evm.transact_commit(call_tx).expect("revm call transaction failed");
+        match call_result {
+            ExecutionResult::Success { output: Output::Call(output), .. } => output.to_vec(),
+            ExecutionResult::Success { output, .. } => panic!("unexpected call output: {output:?}"),
+            ExecutionResult::Revert { output, .. } => {
+                panic!("call reverted: 0x{}", hex::encode(output))
+            }
+            ExecutionResult::Halt { reason, .. } => panic!("call halted: {reason:?}"),
+        }
+    }
+
+    #[cfg(feature = "revm")]
+    fn abi_word(output: &[u8], index: usize) -> &[u8] {
+        let start = index * 32;
+        &output[start..start + 32]
+    }
+
+    #[cfg(feature = "revm")]
+    fn abi_word_to_usize(word: &[u8]) -> usize {
+        assert!(word[..24].iter().all(|byte| *byte == 0), "expected usize-sized ABI word");
+        u64::from_be_bytes(word[24..32].try_into().unwrap()) as usize
+    }
+
+    #[cfg(feature = "revm")]
+    fn u256_hex(value: U256) -> String {
+        format!("0x{}", hex::encode(value.to_be_bytes::<32>()))
+    }
 
     #[test]
     fn read_ec_point_decodes_zero_zero_as_identity() {
@@ -480,5 +618,300 @@ mod tests {
         };
         assert_eq!(transcript.buf.len(), 2 * encoded_len);
         assert!(transcript.buf.iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn constant_absorption_after_squeeze_extends_transcript_buffer() {
+        let loader = EvmLoader::new::<Fq, Fr>();
+        let mut transcript = EvmTranscript::<G1Affine, Rc<EvmLoader>, _, _>::new(&loader);
+
+        let first = loader.scalar(Value::Constant(fe_to_u256(Fr::from(7u64))));
+        Transcript::common_scalar(&mut transcript, &first).unwrap();
+        assert_eq!(transcript.buf.len(), 0x20);
+
+        let _ = Transcript::squeeze_challenge(&mut transcript);
+        assert_eq!(transcript.buf.len(), 0x20);
+
+        let second = loader.scalar(Value::Constant(fe_to_u256(Fr::from(42u64))));
+        Transcript::common_scalar(&mut transcript, &second).unwrap();
+        assert_eq!(
+            transcript.buf.len(),
+            0x40,
+            "absorbing a scalar after squeeze must append to the running transcript bytes"
+        );
+    }
+
+    #[test]
+    fn sharded_transcript_ir_contains_expected_equivalence_checks() {
+        let scalar_0 = Fr::from(7u64);
+        let scalar_1 = Fr::from(42u64);
+
+        let mut rust_transcript = EvmTranscript::<G1Affine, NativeLoader, _, _>::new(());
+        Transcript::common_scalar(&mut rust_transcript, &scalar_0).unwrap();
+        let expected_challenge_0 = fe_to_u256(Transcript::squeeze_challenge(&mut rust_transcript));
+        Transcript::common_ec_point(&mut rust_transcript, &G1Affine::identity()).unwrap();
+        Transcript::common_scalar(&mut rust_transcript, &scalar_1).unwrap();
+        let expected_challenge_1 = fe_to_u256(Transcript::squeeze_challenge(&mut rust_transcript));
+
+        let expected_challenge_0_hex =
+            format!("0x{}", hex::encode(expected_challenge_0.to_be_bytes::<32>()));
+        let expected_challenge_1_hex =
+            format!("0x{}", hex::encode(expected_challenge_1.to_be_bytes::<32>()));
+
+        let loader = EvmLoader::new::<Fq, Fr>();
+        let mut evm_transcript = EvmTranscript::<G1Affine, Rc<EvmLoader>, _, _>::new(&loader);
+        let scalar_0_loaded = loader.scalar(Value::Constant(fe_to_u256(scalar_0)));
+        Transcript::common_scalar(&mut evm_transcript, &scalar_0_loaded).unwrap();
+        let challenge_0 = Transcript::squeeze_challenge(&mut evm_transcript);
+        let identity = loader.ec_point_load_const(&G1Affine::identity());
+        Transcript::common_ec_point(&mut evm_transcript, &identity).unwrap();
+        let scalar_1_loaded = loader.scalar(Value::Constant(fe_to_u256(scalar_1)));
+        Transcript::common_scalar(&mut evm_transcript, &scalar_1_loaded).unwrap();
+        let challenge_1 = Transcript::squeeze_challenge(&mut evm_transcript);
+
+        let challenge_0_ptr = challenge_0.ptr();
+        let challenge_1_ptr = challenge_1.ptr();
+        loader.code_mut().runtime_append(format!(
+            "
+            if iszero(eq(mload({challenge_0_ptr:#x}), {expected_challenge_0_hex})) {{ success := 0 }}
+            if iszero(eq(mload({challenge_1_ptr:#x}), {expected_challenge_1_hex})) {{ success := 0 }}
+            "
+        ));
+
+        {
+            let code = loader.code_mut();
+            let runtime_blocks = code.runtime_blocks();
+            assert!(runtime_blocks.iter().any(|block| block.contains("mstore8(")));
+            assert!(runtime_blocks.iter().any(|block| block.contains("mod(hash, f_q)")));
+            assert!(runtime_blocks
+                .iter()
+                .any(|block| block.contains(&format!("mload({challenge_0_ptr:#x})"))));
+            assert!(runtime_blocks
+                .iter()
+                .any(|block| block.contains(&format!("mload({challenge_1_ptr:#x})"))));
+        }
+
+        let artifacts = loader.unrolled_sharded_verifier_artifacts();
+        assert!(
+            artifacts.dispatcher_solidity.contains("call(gas(), shard"),
+            "dispatcher should call shard contracts"
+        );
+        assert!(
+            !artifacts.shard_solidity_sources.is_empty(),
+            "sharded generation should produce at least one shard source"
+        );
+        let shard_sources = artifacts.shard_solidity_sources.join("\n");
+        assert!(shard_sources.contains(&expected_challenge_0_hex));
+        assert!(shard_sources.contains(&expected_challenge_1_hex));
+    }
+
+    #[cfg(feature = "revm")]
+    #[test]
+    fn rust_and_solidity_transcript_traces_match_per_operation() {
+        const SOLIDITY: &str = r#"
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.30;
+
+contract TranscriptTraceHarness {
+    function trace(bytes32 scalar0, bytes32 scalar1, uint256 f_q)
+        external
+        pure
+        returns (
+            uint256[5] memory lens,
+            bytes32[5] memory digests,
+            bytes32[2] memory hashes,
+            uint256[2] memory challenges
+        )
+    {
+        bytes memory buf = abi.encodePacked(scalar0);
+        lens[0] = buf.length;
+        digests[0] = keccak256(buf);
+
+        bytes memory squeezeInput = buf.length == 32 ? bytes.concat(buf, hex"01") : buf;
+        bytes32 hash0 = keccak256(squeezeInput);
+        hashes[0] = hash0;
+        challenges[0] = uint256(hash0) % f_q;
+        buf = abi.encodePacked(hash0);
+        lens[1] = buf.length;
+        digests[1] = keccak256(buf);
+
+        buf = bytes.concat(buf, bytes32(0), bytes32(0), bytes32(0), bytes32(0));
+        lens[2] = buf.length;
+        digests[2] = keccak256(buf);
+
+        buf = bytes.concat(buf, scalar1);
+        lens[3] = buf.length;
+        digests[3] = keccak256(buf);
+
+        squeezeInput = buf.length == 32 ? bytes.concat(buf, hex"01") : buf;
+        bytes32 hash1 = keccak256(squeezeInput);
+        hashes[1] = hash1;
+        challenges[1] = uint256(hash1) % f_q;
+        buf = abi.encodePacked(hash1);
+        lens[4] = buf.length;
+        digests[4] = keccak256(buf);
+    }
+}
+"#;
+
+        let scalar_0 = Fr::from(7u64);
+        let scalar_1 = Fr::from(42u64);
+
+        let mut rust_transcript = EvmTranscript::<G1Affine, NativeLoader, _, _>::new(());
+        let mut rust_lens = Vec::new();
+        let mut rust_digests = Vec::new();
+        let mut rust_hashes = Vec::new();
+        let mut rust_challenges = Vec::new();
+
+        Transcript::common_scalar(&mut rust_transcript, &scalar_0).unwrap();
+        rust_lens.push(rust_transcript.buf.len());
+        rust_digests.push(<[u8; 32]>::from(Keccak256::digest(rust_transcript.buf.as_slice())));
+
+        let challenge_0 = Transcript::squeeze_challenge(&mut rust_transcript);
+        rust_hashes.push(<[u8; 32]>::try_from(rust_transcript.buf.clone()).unwrap());
+        rust_challenges.push(fe_to_u256(challenge_0));
+        rust_lens.push(rust_transcript.buf.len());
+        rust_digests.push(<[u8; 32]>::from(Keccak256::digest(rust_transcript.buf.as_slice())));
+
+        Transcript::common_ec_point(&mut rust_transcript, &G1Affine::identity()).unwrap();
+        rust_lens.push(rust_transcript.buf.len());
+        rust_digests.push(<[u8; 32]>::from(Keccak256::digest(rust_transcript.buf.as_slice())));
+
+        Transcript::common_scalar(&mut rust_transcript, &scalar_1).unwrap();
+        rust_lens.push(rust_transcript.buf.len());
+        rust_digests.push(<[u8; 32]>::from(Keccak256::digest(rust_transcript.buf.as_slice())));
+
+        let challenge_1 = Transcript::squeeze_challenge(&mut rust_transcript);
+        rust_hashes.push(<[u8; 32]>::try_from(rust_transcript.buf.clone()).unwrap());
+        rust_challenges.push(fe_to_u256(challenge_1));
+        rust_lens.push(rust_transcript.buf.len());
+        rust_digests.push(<[u8; 32]>::from(Keccak256::digest(rust_transcript.buf.as_slice())));
+
+        let deployment_code = compile_solidity(SOLIDITY);
+        let selector = <[u8; 32]>::from(Keccak256::digest(b"trace(bytes32,bytes32,uint256)"));
+        let mut calldata = Vec::with_capacity(4 + 32 * 3);
+        calldata.extend_from_slice(&selector[..4]);
+
+        let mut scalar_0_be = scalar_0.to_repr();
+        scalar_0_be.as_mut().reverse();
+        calldata.extend_from_slice(scalar_0_be.as_ref());
+
+        let mut scalar_1_be = scalar_1.to_repr();
+        scalar_1_be.as_mut().reverse();
+        calldata.extend_from_slice(scalar_1_be.as_ref());
+
+        calldata.extend_from_slice(&modulus::<Fr>().to_be_bytes::<32>());
+
+        let output = deploy_and_call_with_output(deployment_code, calldata);
+        assert_eq!(output.len(), 32 * 14, "unexpected ABI payload size");
+
+        let solidity_lens =
+            (0..5).map(|idx| abi_word_to_usize(abi_word(&output, idx))).collect::<Vec<_>>();
+        let solidity_digests = (5..10)
+            .map(|idx| <[u8; 32]>::try_from(abi_word(&output, idx)).unwrap())
+            .collect::<Vec<_>>();
+        let solidity_hashes = (10..12)
+            .map(|idx| <[u8; 32]>::try_from(abi_word(&output, idx)).unwrap())
+            .collect::<Vec<_>>();
+        let solidity_challenges =
+            (12..14).map(|idx| U256::from_be_slice(abi_word(&output, idx))).collect::<Vec<_>>();
+
+        assert_eq!(solidity_lens, rust_lens, "buffer lengths diverged");
+        assert_eq!(solidity_digests, rust_digests, "buffer digests diverged");
+        assert_eq!(solidity_hashes, rust_hashes, "squeeze hashes diverged");
+        assert_eq!(solidity_challenges, rust_challenges, "challenge reductions diverged");
+    }
+
+    #[cfg(feature = "revm")]
+    #[test]
+    fn sharded_dispatcher_rejects_empty_shard_set() {
+        let loader = EvmLoader::new::<Fq, Fr>();
+        let mut evm_transcript = EvmTranscript::<G1Affine, Rc<EvmLoader>, _, _>::new(&loader);
+        let scalar = loader.scalar(Value::Constant(fe_to_u256(Fr::from(7u64))));
+        Transcript::common_scalar(&mut evm_transcript, &scalar).unwrap();
+        let _ = Transcript::squeeze_challenge(&mut evm_transcript);
+
+        let artifacts = loader.unrolled_sharded_verifier_artifacts();
+        assert!(
+            deploy_unrolled_sharded_and_call(vec![], artifacts.dispatcher_deployment_code, vec![])
+                .is_err(),
+            "dispatcher with no shards must reject all calls"
+        );
+    }
+
+    #[cfg(feature = "revm")]
+    #[test]
+    fn sharded_contract_transcript_matches_rust_transcript() {
+        let scalar_0 = Fr::from(7u64);
+        let scalar_1 = Fr::from(42u64);
+
+        let mut rust_transcript = EvmTranscript::<G1Affine, NativeLoader, _, _>::new(());
+        Transcript::common_scalar(&mut rust_transcript, &scalar_0).unwrap();
+        let expected_challenge_0 = fe_to_u256(Transcript::squeeze_challenge(&mut rust_transcript));
+        Transcript::common_ec_point(&mut rust_transcript, &G1Affine::identity()).unwrap();
+        Transcript::common_scalar(&mut rust_transcript, &scalar_1).unwrap();
+        let expected_challenge_1 = fe_to_u256(Transcript::squeeze_challenge(&mut rust_transcript));
+
+        let loader = EvmLoader::new::<Fq, Fr>();
+        let mut evm_transcript = EvmTranscript::<G1Affine, Rc<EvmLoader>, _, _>::new(&loader);
+        let scalar_0_loaded = loader.scalar(Value::Constant(fe_to_u256(scalar_0)));
+        Transcript::common_scalar(&mut evm_transcript, &scalar_0_loaded).unwrap();
+        let challenge_0 = Transcript::squeeze_challenge(&mut evm_transcript);
+        let identity = loader.ec_point_load_const(&G1Affine::identity());
+        Transcript::common_ec_point(&mut evm_transcript, &identity).unwrap();
+        let scalar_1_loaded = loader.scalar(Value::Constant(fe_to_u256(scalar_1)));
+        Transcript::common_scalar(&mut evm_transcript, &scalar_1_loaded).unwrap();
+        let challenge_1 = Transcript::squeeze_challenge(&mut evm_transcript);
+
+        let challenge_0_ptr = challenge_0.ptr();
+        let challenge_1_ptr = challenge_1.ptr();
+        loader.code_mut().runtime_append(format!(
+            "
+            if iszero(eq(mload({challenge_0_ptr:#x}), {})) {{ success := 0 }}
+            if iszero(eq(mload({challenge_1_ptr:#x}), {})) {{ success := 0 }}
+            ",
+            u256_hex(expected_challenge_0),
+            u256_hex(expected_challenge_1),
+        ));
+
+        let artifacts = loader.unrolled_sharded_verifier_artifacts();
+        deploy_unrolled_sharded_and_call(
+            artifacts.shard_deployment_codes,
+            artifacts.dispatcher_deployment_code,
+            vec![],
+        )
+        .expect("sharded transcript contract should match rust transcript challenges");
+
+        let loader_bad = EvmLoader::new::<Fq, Fr>();
+        let mut evm_transcript_bad =
+            EvmTranscript::<G1Affine, Rc<EvmLoader>, _, _>::new(&loader_bad);
+        let scalar_0_loaded_bad = loader_bad.scalar(Value::Constant(fe_to_u256(scalar_0)));
+        Transcript::common_scalar(&mut evm_transcript_bad, &scalar_0_loaded_bad).unwrap();
+        let challenge_0_bad = Transcript::squeeze_challenge(&mut evm_transcript_bad);
+        let identity_bad = loader_bad.ec_point_load_const(&G1Affine::identity());
+        Transcript::common_ec_point(&mut evm_transcript_bad, &identity_bad).unwrap();
+        let scalar_1_loaded_bad = loader_bad.scalar(Value::Constant(fe_to_u256(scalar_1)));
+        Transcript::common_scalar(&mut evm_transcript_bad, &scalar_1_loaded_bad).unwrap();
+        let challenge_1_bad = Transcript::squeeze_challenge(&mut evm_transcript_bad);
+        loader_bad.code_mut().runtime_append(format!(
+            "
+            if iszero(eq(mload({:#x}), {})) {{ success := 0 }}
+            if iszero(eq(mload({:#x}), {})) {{ success := 0 }}
+            ",
+            challenge_0_bad.ptr(),
+            u256_hex(expected_challenge_0),
+            challenge_1_bad.ptr(),
+            u256_hex(expected_challenge_1 + U256::from(1u64)),
+        ));
+        let artifacts_bad = loader_bad.unrolled_sharded_verifier_artifacts();
+        assert!(
+            deploy_unrolled_sharded_and_call(
+                artifacts_bad.shard_deployment_codes,
+                artifacts_bad.dispatcher_deployment_code,
+                vec![],
+            )
+            .is_err(),
+            "wrong expected challenge should fail transcript-equivalence checks"
+        );
     }
 }

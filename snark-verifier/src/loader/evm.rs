@@ -4,10 +4,11 @@ mod code;
 pub(crate) mod loader;
 pub(crate) mod util;
 
+pub use code::{UnrolledShardedProgramManifest, UnrolledShardedVerifierArtifacts};
 pub use loader::{EcPoint, EvmLoader, Scalar};
-#[cfg(feature = "revm")]
-pub use util::deploy_and_call;
 pub use util::{
-    compile_solidity, encode_calldata, estimate_gas, fe_to_u256, modulus, u256_to_fe, Address,
-    B256, U256, U512,
+    compile_solidity, compile_solidity_runtime, encode_calldata, estimate_gas, fe_to_u256, modulus,
+    u256_to_fe, Address, B256, U256, U512,
 };
+#[cfg(feature = "revm")]
+pub use util::{deploy_and_call, deploy_unrolled_sharded_and_call};

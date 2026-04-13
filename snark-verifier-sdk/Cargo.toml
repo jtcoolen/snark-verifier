@@ -113,3 +113,8 @@ name = "midnight_poseidon_evm"
 # EVM transcript flow plus optional Solidity/revm generation checks.
 required-features = ["midnight", "loader_evm"]
 path = "examples/midnight_poseidon_evm.rs"
+
+[[example]]
+name = "midnight_ivc_evm"
+required-features = ["midnight", "loader_evm"]
+path = "examples/midnight_ivc_evm.rs"

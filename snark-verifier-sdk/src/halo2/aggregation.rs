@@ -199,7 +199,7 @@ where
                     .iter()
                     .map(|t| match t {
                         TranscriptObject::Scalar(_) => 32,
-                        TranscriptObject::EcPoint(_) => 32,
+                        TranscriptObject::EcPoint(_) => 48,
                     })
                     .sum::<usize>()
             );

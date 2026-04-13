@@ -1,6 +1,8 @@
 //! Generate and verify the Poseidon example with Midnight's EVM transcript.
 //! Run with:
 //!   cargo run --example midnight_poseidon_evm --features midnight,loader_evm,revm -p snark-verifier-sdk
+#![allow(clippy::uninlined_format_args)]
+
 use ff::Field;
 use midnight_circuits::{
     hash::poseidon::PoseidonChip,
@@ -15,14 +17,122 @@ use midnight_proofs::{
 use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
 use rand::{rngs::OsRng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
+use snark_verifier::loader::evm::UnrolledShardedVerifierArtifacts;
 use snark_verifier_sdk::midnight_adapter::{MidnightBundleOptions, MidnightProofBundle};
-use std::path::PathBuf;
+use std::{fmt::Write as _, path::PathBuf};
 
 #[path = "support/midnight_evm_transcript.rs"]
 mod midnight_evm_transcript;
 use midnight_evm_transcript::MidnightEvmHash;
 
 type F = midnight_curves::Fq;
+
+fn write_unrolled_sharded_artifacts(
+    out_dir: &std::path::Path,
+    artifacts: &UnrolledShardedVerifierArtifacts,
+) {
+    let dispatcher_solidity_path =
+        out_dir.join("MidnightPoseidonVerifierUnrolledShardedDispatcher.sol");
+    let dispatcher_bytecode_path =
+        out_dir.join("midnight_poseidon_unrolled_sharded_dispatcher.bytecode");
+    let shards_path = out_dir.join("midnight_poseidon_unrolled_sharded_shards.bytecode");
+    let manifest_path = out_dir.join("midnight_poseidon_unrolled_sharded_manifest.txt");
+
+    std::fs::write(&dispatcher_solidity_path, &artifacts.dispatcher_solidity)
+        .expect("failed to write unrolled-sharded dispatcher Solidity");
+    std::fs::write(
+        &dispatcher_bytecode_path,
+        format!("0x{}", hex::encode(&artifacts.dispatcher_deployment_code)),
+    )
+    .expect("failed to write unrolled-sharded dispatcher deployment bytecode");
+
+    let mut shard_deployments = String::new();
+    for (idx, code) in artifacts.shard_deployment_codes.iter().enumerate() {
+        writeln!(&mut shard_deployments, "shard[{idx}] = 0x{}", hex::encode(code))
+            .expect("shard deployment formatting should not fail");
+    }
+    std::fs::write(&shards_path, shard_deployments)
+        .expect("failed to write unrolled-sharded shard deployment bytecodes");
+
+    let mut manifest = String::new();
+    writeln!(
+        &mut manifest,
+        "runtime_code_size_limit_bytes: {}",
+        artifacts.manifest.runtime_code_size_limit_bytes
+    )
+    .expect("manifest formatting should not fail");
+    writeln!(
+        &mut manifest,
+        "initcode_size_limit_bytes: {}",
+        artifacts.manifest.initcode_size_limit_bytes
+    )
+    .expect("manifest formatting should not fail");
+    writeln!(&mut manifest, "total_statements: {}", artifacts.manifest.total_statements)
+        .expect("manifest formatting should not fail");
+    writeln!(
+        &mut manifest,
+        "shard_statement_start_indices: {:?}",
+        artifacts.manifest.shard_statement_start_indices
+    )
+    .expect("manifest formatting should not fail");
+    writeln!(
+        &mut manifest,
+        "shard_statement_end_indices: {:?}",
+        artifacts.manifest.shard_statement_end_indices
+    )
+    .expect("manifest formatting should not fail");
+    writeln!(
+        &mut manifest,
+        "dispatcher_runtime_code_bytes: {}",
+        artifacts.manifest.dispatcher_runtime_code_bytes
+    )
+    .expect("manifest formatting should not fail");
+    writeln!(
+        &mut manifest,
+        "dispatcher_deployment_code_bytes: {}",
+        artifacts.manifest.dispatcher_deployment_code_bytes
+    )
+    .expect("manifest formatting should not fail");
+    writeln!(
+        &mut manifest,
+        "shard_runtime_code_bytes: {:?}",
+        artifacts.manifest.shard_runtime_code_bytes
+    )
+    .expect("manifest formatting should not fail");
+    writeln!(
+        &mut manifest,
+        "shard_deployment_code_bytes: {:?}",
+        artifacts.manifest.shard_deployment_code_bytes
+    )
+    .expect("manifest formatting should not fail");
+    std::fs::write(&manifest_path, manifest).expect("failed to write unrolled-sharded manifest");
+
+    for (idx, shard_solidity) in artifacts.shard_solidity_sources.iter().enumerate() {
+        let shard_solidity_path =
+            out_dir.join(format!("MidnightPoseidonVerifierUnrolledShardedShard{idx}.sol"));
+        std::fs::write(&shard_solidity_path, shard_solidity)
+            .expect("failed to write unrolled-sharded shard Solidity");
+    }
+
+    let shard_runtime_sizes =
+        artifacts.shard_runtime_codes.iter().map(Vec::len).collect::<Vec<_>>();
+    let shard_deployment_sizes =
+        artifacts.shard_deployment_codes.iter().map(Vec::len).collect::<Vec<_>>();
+    println!(
+        "unrolled-sharded dispatcher runtime bytes: {}",
+        artifacts.dispatcher_runtime_code.len()
+    );
+    println!(
+        "unrolled-sharded dispatcher initcode bytes: {}",
+        artifacts.dispatcher_deployment_code.len()
+    );
+    println!("unrolled-sharded shard runtime sizes (bytes): {:?}", shard_runtime_sizes);
+    println!("unrolled-sharded shard initcode sizes (bytes): {:?}", shard_deployment_sizes);
+    println!("wrote {}", dispatcher_solidity_path.display());
+    println!("wrote {}", dispatcher_bytecode_path.display());
+    println!("wrote {}", shards_path.display());
+    println!("wrote {}", manifest_path.display());
+}
 
 #[derive(Clone, Default)]
 pub struct PoseidonExample;
@@ -68,6 +178,7 @@ impl Relation for PoseidonExample {
 
 fn main() {
     const K: u32 = 6;
+
     let srs = ParamsKZG::<Bls12>::unsafe_setup(K, OsRng);
 
     // Build proving/verifying keys for the Poseidon relation.
@@ -105,12 +216,6 @@ fn main() {
     )
     .expect("Bundle creation should succeed");
 
-    // Generate Solidity source, compile bytecode, and encode calldata artifacts.
-    let solidity = bundle
-        .generate_evm_verifier_solidity()
-        .expect("failed to generate Solidity verifier source");
-    let bytecode =
-        bundle.generate_evm_verifier_bytecode().expect("failed to compile Solidity verifier");
     let calldata = bundle.encode_evm_calldata().expect("failed to encode EVM calldata");
 
     let out_dir =
@@ -118,31 +223,28 @@ fn main() {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("midnight")
         });
     std::fs::create_dir_all(&out_dir).expect("failed to create output directory");
-    let solidity_path = out_dir.join("MidnightPoseidonVerifier.sol");
-    let bytecode_path = out_dir.join("midnight_poseidon.bytecode");
     let calldata_path = out_dir.join("midnight_poseidon.calldata");
 
-    // Persist generated artifacts to disk (default: target/midnight).
-    std::fs::write(&solidity_path, &solidity).expect("failed to write Solidity verifier");
-    std::fs::write(&bytecode_path, format!("0x{}", hex::encode(&bytecode)))
-        .expect("failed to write verifier bytecode");
     std::fs::write(&calldata_path, hex::encode(&calldata)).expect("failed to write calldata");
 
     println!("proof bytes: {}", proof.len());
-    println!("deployment code bytes: {}", bytecode.len());
+    println!("verifier mode: unrolled-sharded");
     println!("calldata bytes: {}", calldata.len());
-    println!("wrote {}", solidity_path.display());
-    println!("wrote {}", bytecode_path.display());
     println!("wrote {}", calldata_path.display());
+
+    let artifacts = bundle
+        .generate_evm_verifier_unrolled_sharded_artifacts()
+        .expect("failed to generate unrolled-sharded verifier artifacts");
+    write_unrolled_sharded_artifacts(&out_dir, &artifacts);
 
     #[cfg(feature = "revm")]
     {
         // Optional local revm simulation for end-to-end gas measurement.
         if std::env::var("RUN_REVM").ok().as_deref() == Some("1") {
             let gas = bundle
-                .verify_with_generated_solidity_revm()
+                .verify_with_generated_solidity_revm_unrolled_sharded()
                 .expect("revm verification should succeed");
-            println!("revm gas: {gas}");
+            println!("revm gas (unrolled-sharded): {gas}");
         } else {
             println!("revm verification skipped (set RUN_REVM=1 to run local revm simulation)");
         }

@@ -1,8 +1,12 @@
 use crate::{
     loader::{
         evm::{
-            code::{Precompiled, SolidityAssemblyCode},
-            fe_to_u256, modulus, u256_to_fe, U256, U512,
+            code::{
+                Precompiled, SolidityAssemblyCode, UnrolledShardedProgramManifest,
+                UnrolledShardedVerifierArtifacts,
+            },
+            compile_solidity, compile_solidity_runtime, fe_to_u256, modulus, u256_to_fe, U256,
+            U512,
         },
         EcPointLoader, LoadedEcPoint, LoadedScalar, Loader, ScalarLoader,
     },
@@ -13,11 +17,12 @@ use crate::{
 };
 use hex;
 use std::{
-    cell::RefCell,
+    cell::{RefCell, RefMut},
     collections::HashMap,
     fmt::{self, Debug},
     iter,
-    ops::{Add, AddAssign, DerefMut, Mul, MulAssign, Neg, Sub, SubAssign},
+    ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
+    panic::{catch_unwind, AssertUnwindSafe},
     rc::Rc,
 };
 
@@ -26,6 +31,32 @@ pub const MEM_PTR_START: usize = 0x80;
 const BLS_ENCODED_FP_BYTES: usize = 0x40;
 const BLS_G1_BYTES: usize = 2 * BLS_ENCODED_FP_BYTES;
 const BLS_G2_BYTES: usize = 4 * BLS_ENCODED_FP_BYTES;
+const EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES: usize = 24_576;
+const EVM_INITCODE_SIZE_LIMIT_BYTES: usize = 49_152;
+const SHARDED_INITIAL_GROUP_SIZE: usize = 64;
+
+/// Half-open index range `[start, end)` over emitted runtime statement blocks.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ShardStatementRange {
+    start: usize,
+    end: usize,
+}
+
+impl ShardStatementRange {
+    /// Returns the number of statements covered by this half-open range.
+    fn len(self) -> usize {
+        self.end - self.start
+    }
+
+    /// Splits the range into two contiguous halves.
+    ///
+    /// Panics when called for a single-statement range.
+    fn bisect(self) -> (Self, Self) {
+        assert!(self.len() > 1, "cannot bisect a single-statement range");
+        let mid = self.start + self.len() / 2;
+        (Self { start: self.start, end: mid }, Self { start: mid, end: self.end })
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum Value<T> {
@@ -58,6 +89,7 @@ impl<T: Debug> Value<T> {
 pub struct EvmLoader {
     scalar_modulus: U256,
     base_field_bytes: usize,
+    invert_modexp_input_ptr: RefCell<Option<usize>>,
     code: RefCell<SolidityAssemblyCode>,
     ptr: RefCell<usize>,
     cache: RefCell<HashMap<String, usize>>,
@@ -67,19 +99,163 @@ fn hex_encode_u256(value: &U256) -> String {
     format!("0x{}", hex::encode(value.to_be_bytes::<32>()))
 }
 
-fn be_bytes_to_u256(bytes: &[u8]) -> U256 {
-    let word: [u8; 32] = bytes.try_into().expect("word must be 32 bytes");
-    U256::from_be_bytes(word)
+/// Returns deterministic shard contract names (`Halo2VerifierShard{index}`).
+fn unrolled_shard_contract_name(index: usize) -> String {
+    format!("Halo2VerifierShard{index}")
 }
 
+/// Wraps a shard runtime-body snippet in a full deployable Solidity contract.
+fn build_unrolled_shard_solidity(
+    contract_name: &str,
+    scalar_modulus: U256,
+    memory_snapshot_bytes: usize,
+    body: &str,
+) -> String {
+    assert_eq!(
+        memory_snapshot_bytes % 0x20,
+        0,
+        "memory snapshot byte length must be 32-byte aligned"
+    );
+    format!(
+        r#"
+// SPDX-License-Identifier: MIT
+
+pragma solidity 0.8.30;
+
+contract {contract_name} {{
+    fallback(bytes calldata) external returns (bytes memory) {{
+        assembly ("memory-safe") {{
+            let data := mload(0x40)
+            if iszero(eq(data, 0x80)) {{
+                revert(0, 0)
+            }}
+            if lt(calldatasize(), {memory_snapshot_bytes}) {{
+                revert(0, 0)
+            }}
+
+            let state_bytes := {memory_snapshot_bytes}
+            if state_bytes {{
+                calldatacopy(0x80, sub(calldatasize(), state_bytes), state_bytes)
+            }}
+
+            let success := 1
+            let f_q := {scalar_modulus}
+{body}
+            mstore(0x00, success)
+            for {{ let i := 0 }} lt(i, state_bytes) {{ i := add(i, 0x20) }} {{
+                mstore(add(0x20, i), mload(add(0x80, i)))
+            }}
+            return(0x00, add(0x20, state_bytes))
+        }}
+    }}
+}}
+"#,
+        scalar_modulus = hex_encode_u256(&scalar_modulus),
+        memory_snapshot_bytes = memory_snapshot_bytes,
+    )
+}
+
+/// Builds the fixed dispatcher contract that calls each verifier shard and carries memory state.
+fn build_unrolled_dispatcher_solidity(memory_snapshot_bytes: usize) -> String {
+    assert_eq!(
+        memory_snapshot_bytes % 0x20,
+        0,
+        "memory snapshot byte length must be 32-byte aligned"
+    );
+    // `shards` is the first state variable and occupies storage slot 0.
+    // Dynamic-array element base slot is `keccak256(abi.encode(slot))`.
+    r#"
+// SPDX-License-Identifier: MIT
+
+pragma solidity 0.8.30;
+
+contract Halo2VerifierDispatcher {
+    address[] private shards;
+
+    constructor(address[] memory _shards) {
+        shards = _shards;
+    }
+
+    fallback(bytes calldata) external returns (bytes memory) {
+        assembly ("memory-safe") {
+            let data := mload(0x40)
+            if iszero(eq(data, 0x80)) {
+                revert(0, 0)
+            }
+            let state_bytes := __MEMORY_SNAPSHOT_BYTES__
+
+            let calldata_ptr := 0x80
+            let proof_len := calldatasize()
+            calldatacopy(calldata_ptr, 0, proof_len)
+            let state_ptr := add(calldata_ptr, proof_len)
+            for { let j := 0 } lt(j, state_bytes) { j := add(j, 0x20) } {
+                mstore(add(state_ptr, j), 0)
+            }
+            let payload_len := add(proof_len, state_bytes)
+
+            let len := sload(0)
+            if iszero(len) {
+                revert(0, 0)
+            }
+            mstore(0x00, 0)
+            let base := keccak256(0x00, 0x20)
+
+            for { let i := 0 } lt(i, len) { i := add(i, 1) } {
+                let shard := and(
+                    sload(add(base, i)),
+                    0x000000000000000000000000ffffffffffffffffffffffffffffffffffffffff
+                )
+                if iszero(call(gas(), shard, 0, calldata_ptr, payload_len, 0, 0)) {
+                    returndatacopy(0, 0, returndatasize())
+                    revert(0, returndatasize())
+                }
+                if iszero(eq(returndatasize(), add(0x20, state_bytes))) {
+                    revert(0, 0)
+                }
+                returndatacopy(0, 0, 0x20)
+                if iszero(mload(0)) {
+                    revert(0, 0)
+                }
+                for { let j := 0 } lt(j, state_bytes) { j := add(j, 0x20) } {
+                    returndatacopy(add(state_ptr, j), add(0x20, j), 0x20)
+                }
+            }
+            return(0, 0)
+        }
+    }
+}
+"#
+    .replace("__MEMORY_SNAPSHOT_BYTES__", &memory_snapshot_bytes.to_string())
+}
+
+/// Best-effort compiles Solidity source into deployment/runtime bytecode.
+///
+/// Returns `None` when either compile panics.
+fn try_compile_solidity_sizes(solidity: &str) -> Option<(Vec<u8>, Vec<u8>)> {
+    let deployment = catch_unwind(AssertUnwindSafe(|| compile_solidity(solidity))).ok()?;
+    let runtime = catch_unwind(AssertUnwindSafe(|| compile_solidity_runtime(solidity))).ok()?;
+    Some((deployment, runtime))
+}
+
+/// Concatenates a statement-block sub-range with newlines.
+fn join_statement_blocks(blocks: &[String], start: usize, end: usize) -> String {
+    blocks[start..end].iter().map(String::as_str).join("\n")
+}
+
+/// Returns whether compiled deployment/runtime bytecode sizes satisfy EIP-3860 and EIP-170.
+fn fits_evm_code_size_limits(deployment: &[u8], runtime: &[u8]) -> bool {
+    runtime.len() <= EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES
+        && deployment.len() <= EVM_INITCODE_SIZE_LIMIT_BYTES
+}
+
+/// Decodes little-endian bytes into two padded big-endian 256-bit words.
 fn le_bytes_to_padded_be_words(bytes_le: &[u8]) -> [U256; 2] {
     assert!(bytes_le.len() <= BLS_ENCODED_FP_BYTES);
     let mut padded = [0u8; BLS_ENCODED_FP_BYTES];
-    // Field elements come in little-endian; precompile ABI expects big-endian words.
     let be = bytes_le.iter().rev().copied().collect_vec();
     let offset = BLS_ENCODED_FP_BYTES - be.len();
     padded[offset..].copy_from_slice(&be);
-    [be_bytes_to_u256(&padded[..0x20]), be_bytes_to_u256(&padded[0x20..BLS_ENCODED_FP_BYTES])]
+    [U256::from_be_slice(&padded[..0x20]), U256::from_be_slice(&padded[0x20..BLS_ENCODED_FP_BYTES])]
 }
 
 impl EvmLoader {
@@ -100,6 +276,7 @@ impl EvmLoader {
         Rc::new(Self {
             scalar_modulus,
             base_field_bytes,
+            invert_modexp_input_ptr: RefCell::new(None),
             code: RefCell::new(code),
             ptr: RefCell::new(MEM_PTR_START),
             cache: Default::default(),
@@ -110,14 +287,253 @@ impl EvmLoader {
     /// In other words, it's basically just assembly (equivalently, Yul).
     pub fn solidity_code(self: &Rc<Self>) -> String {
         let code = "
-            // Revert if anything fails
-            if iszero(success) { revert(0, 0) }
+                    // Revert if anything fails
+                    if iszero(success) { revert(0, 0) }
 
-            // Return empty bytes on success
-            return(0, 0)"
+                    // Return empty bytes on success
+                    return(0, 0)"
             .to_string();
         self.code.borrow_mut().runtime_append(code);
         self.code.borrow().code(hex_encode_u256(&self.scalar_modulus))
+    }
+
+    /// Returns a mutable handle to the underlying assembly code buffer.
+    pub fn code_mut(&self) -> RefMut<'_, SolidityAssemblyCode> {
+        self.code.borrow_mut()
+    }
+
+    /// Compiles one shard candidate for a statement range and returns Solidity + bytecode.
+    fn compile_shard_candidate(
+        &self,
+        statement_blocks: &[String],
+        contract_name: &str,
+        range: ShardStatementRange,
+        memory_snapshot_bytes: usize,
+    ) -> (String, Option<(Vec<u8>, Vec<u8>)>) {
+        let body = join_statement_blocks(statement_blocks, range.start, range.end);
+        let solidity = build_unrolled_shard_solidity(
+            contract_name,
+            self.scalar_modulus,
+            memory_snapshot_bytes,
+            &body,
+        );
+        let artifacts = try_compile_solidity_sizes(&solidity);
+        (solidity, artifacts)
+    }
+
+    /// Ensures `grouped_ranges[cursor]` is compilable and within code-size limits.
+    ///
+    /// If the current range fails, it is bisected in-place and retried until it fits
+    /// or until a single-statement range proves irreducible.
+    fn ensure_grouped_range_fits(
+        &self,
+        statement_blocks: &[String],
+        grouped_ranges: &mut Vec<ShardStatementRange>,
+        cursor: usize,
+        memory_snapshot_bytes: usize,
+    ) {
+        loop {
+            let range = grouped_ranges[cursor];
+            let (_, artifacts) = self.compile_shard_candidate(
+                statement_blocks,
+                "Halo2VerifierShardCandidate",
+                range,
+                memory_snapshot_bytes,
+            );
+            match artifacts {
+                Some((deployment, runtime)) if fits_evm_code_size_limits(&deployment, &runtime) => {
+                    return;
+                }
+                Some((deployment, runtime)) if range.len() <= 1 => {
+                    panic!(
+                        "single statement range [{}..{}) exceeds EVM limits: runtime={} initcode={}",
+                        range.start,
+                        range.end,
+                        runtime.len(),
+                        deployment.len()
+                    );
+                }
+                None if range.len() <= 1 => {
+                    panic!(
+                        "failed to compile unrolled-sharded candidate for statement range [{}..{})",
+                        range.start, range.end
+                    );
+                }
+                _ => {
+                    let (left, right) = range.bisect();
+                    grouped_ranges.splice(cursor..=cursor, [left, right]);
+                }
+            }
+        }
+    }
+
+    /// Finds the largest contiguous grouped-range prefix starting at `cursor` that still fits.
+    fn find_largest_fitting_group_end(
+        &self,
+        statement_blocks: &[String],
+        grouped_ranges: &[ShardStatementRange],
+        cursor: usize,
+        memory_snapshot_bytes: usize,
+    ) -> usize {
+        let mut lo = cursor + 1;
+        let mut hi = grouped_ranges.len() + 1;
+        while lo + 1 < hi {
+            let mid = (lo + hi) / 2;
+            let range = ShardStatementRange {
+                start: grouped_ranges[cursor].start,
+                end: grouped_ranges[mid - 1].end,
+            };
+            let (_, artifacts) = self.compile_shard_candidate(
+                statement_blocks,
+                "Halo2VerifierShardCandidate",
+                range,
+                memory_snapshot_bytes,
+            );
+            let fits = artifacts
+                .as_ref()
+                .map(|(deployment, runtime)| fits_evm_code_size_limits(deployment, runtime))
+                .unwrap_or(false);
+            if fits {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        lo
+    }
+
+    /// Creates compiled shard Solidity/runtime artifacts from final statement ranges.
+    fn build_shard_artifacts(
+        &self,
+        statement_blocks: &[String],
+        shards: &[ShardStatementRange],
+        memory_snapshot_bytes: usize,
+    ) -> (Vec<String>, Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<usize>, Vec<usize>) {
+        shards
+            .iter()
+            .enumerate()
+            .map(|(idx, &range)| {
+                let contract_name = unrolled_shard_contract_name(idx);
+                let (solidity, artifacts) = self.compile_shard_candidate(
+                    statement_blocks,
+                    &contract_name,
+                    range,
+                    memory_snapshot_bytes,
+                );
+                let (deployment_code, runtime_code) = artifacts.unwrap_or_else(|| {
+                    panic!(
+                        "failed to compile finalized unrolled-sharded contract {contract_name} for statement range [{}..{})",
+                        range.start, range.end
+                    )
+                });
+                assert!(
+                    fits_evm_code_size_limits(&deployment_code, &runtime_code),
+                    "unrolled-sharded shard exceeds EVM limits: runtime={} initcode={}",
+                    runtime_code.len(),
+                    deployment_code.len()
+                );
+                (solidity, deployment_code, runtime_code, range.start, range.end)
+            })
+            .multiunzip()
+    }
+
+    /// Returns unrolled-sharded verifier dispatcher plus shard artifacts.
+    ///
+    /// Strategy:
+    /// 1. Split emitted runtime statements into coarse groups.
+    /// 2. Recursively bisect non-fitting groups until each group is individually deployable.
+    /// 3. Binary-search the largest contiguous group window that still fits each shard.
+    /// 4. Compile finalized shard contracts and dispatcher and return all artifacts.
+    pub fn unrolled_sharded_verifier_artifacts(&self) -> UnrolledShardedVerifierArtifacts {
+        let statement_blocks = self.code.borrow().runtime_blocks().to_vec();
+        assert!(
+            !statement_blocks.is_empty(),
+            "unrolled-sharded verifier generation requires at least one emitted statement block"
+        );
+        let memory_snapshot_bytes = self.ptr().saturating_sub(MEM_PTR_START);
+        assert_eq!(
+            memory_snapshot_bytes % 0x20,
+            0,
+            "memory snapshot byte length must be 32-byte aligned"
+        );
+
+        let total_statements = statement_blocks.len();
+
+        // Start with coarse blocks, then refine only where needed.
+        let mut grouped_ranges = (0..total_statements)
+            .step_by(SHARDED_INITIAL_GROUP_SIZE)
+            .map(|start| ShardStatementRange {
+                start,
+                end: (start + SHARDED_INITIAL_GROUP_SIZE).min(total_statements),
+            })
+            .collect_vec();
+
+        let mut cursor = 0usize;
+        let shards = iter::from_fn(|| {
+            (cursor < grouped_ranges.len()).then(|| {
+                self.ensure_grouped_range_fits(
+                    &statement_blocks,
+                    &mut grouped_ranges,
+                    cursor,
+                    memory_snapshot_bytes,
+                );
+                let end_group = self.find_largest_fitting_group_end(
+                    &statement_blocks,
+                    &grouped_ranges,
+                    cursor,
+                    memory_snapshot_bytes,
+                );
+                let shard = ShardStatementRange {
+                    start: grouped_ranges[cursor].start,
+                    end: grouped_ranges[end_group - 1].end,
+                };
+                cursor = end_group;
+                shard
+            })
+        })
+        .collect_vec();
+
+        let (
+            shard_solidity_sources,
+            shard_deployment_codes,
+            shard_runtime_codes,
+            shard_statement_start_indices,
+            shard_statement_end_indices,
+        ) = self.build_shard_artifacts(&statement_blocks, &shards, memory_snapshot_bytes);
+
+        let dispatcher_solidity = build_unrolled_dispatcher_solidity(memory_snapshot_bytes);
+        let (dispatcher_deployment_code, dispatcher_runtime_code) =
+            try_compile_solidity_sizes(&dispatcher_solidity)
+                .expect("failed to compile unrolled-sharded dispatcher Solidity");
+        assert!(
+            fits_evm_code_size_limits(&dispatcher_deployment_code, &dispatcher_runtime_code),
+            "unrolled-sharded dispatcher exceeds EVM limits: runtime={} initcode={}",
+            dispatcher_runtime_code.len(),
+            dispatcher_deployment_code.len()
+        );
+
+        let manifest = UnrolledShardedProgramManifest {
+            runtime_code_size_limit_bytes: EVM_RUNTIME_CODE_SIZE_LIMIT_BYTES,
+            initcode_size_limit_bytes: EVM_INITCODE_SIZE_LIMIT_BYTES,
+            total_statements,
+            memory_snapshot_bytes,
+            shard_statement_start_indices,
+            shard_statement_end_indices,
+            dispatcher_runtime_code_bytes: dispatcher_runtime_code.len(),
+            dispatcher_deployment_code_bytes: dispatcher_deployment_code.len(),
+            shard_runtime_code_bytes: shard_runtime_codes.iter().map(Vec::len).collect(),
+            shard_deployment_code_bytes: shard_deployment_codes.iter().map(Vec::len).collect(),
+        };
+
+        UnrolledShardedVerifierArtifacts {
+            dispatcher_solidity,
+            dispatcher_deployment_code,
+            dispatcher_runtime_code,
+            shard_solidity_sources,
+            shard_deployment_codes,
+            shard_runtime_codes,
+            manifest,
+        }
     }
 
     /// Allocates memory chunk with given `size` and returns pointer.
@@ -139,8 +555,10 @@ impl EvmLoader {
         BLS_G1_BYTES
     }
 
-    pub(crate) fn code_mut(&self) -> impl DerefMut<Target = SolidityAssemblyCode> + '_ {
-        self.code.borrow_mut()
+    fn emit_mstore_const(self: &Rc<Self>, ptr: usize, value: U256) {
+        self.code
+            .borrow_mut()
+            .runtime_append(format!("mstore({ptr:#x}, {})", hex_encode_u256(&value)));
     }
 
     fn push(self: &Rc<Self>, scalar: &Scalar) -> String {
@@ -168,6 +586,36 @@ impl EvmLoader {
         }
     }
 
+    /// Packs `LIMBS` limbs into one 512-bit big-endian field element (`hi || lo`) in memory.
+    ///
+    /// The returned string is Yul code that:
+    /// 1. reconstructs low/high 256-bit accumulators by shifting each limb by `idx * BITS`;
+    /// 2. stores `(hi, lo)` into `ptr` and `ptr + 0x20`.
+    fn pack_limbs_to_field_code<const LIMBS: usize, const BITS: usize>(
+        self: &Rc<Self>,
+        limbs: [&Scalar; LIMBS],
+        lo_var: &str,
+        hi_var: &str,
+        ptr: usize,
+    ) -> String {
+        let init = format!("let {lo_var} := 0\nlet {hi_var} := 0\n");
+        let accum = limbs
+            .iter()
+            .enumerate()
+            .map(|(idx, limb)| {
+                let shift = idx * BITS;
+                assert!(shift < 512, "limb decomposition exceeds 512 bits");
+                let limb_value = self.push(limb);
+                if shift < 256 {
+                    format!("{lo_var} := add({lo_var}, shl({shift}, {limb_value}))\n")
+                } else {
+                    format!("{hi_var} := add({hi_var}, shl({}, {limb_value}))\n", shift - 256)
+                }
+            })
+            .join("");
+        format!("{init}{accum}mstore({ptr:#x}, {hi_var})\nmstore({:#x}, {lo_var})\n", ptr + 0x20)
+    }
+
     /// Calldata load a field element.
     pub fn calldataload_scalar(self: &Rc<Self>, offset: usize) -> Scalar {
         let ptr = self.allocate(0x20);
@@ -185,20 +633,27 @@ impl EvmLoader {
         let pad = BLS_ENCODED_FP_BYTES - coord_bytes;
         let x_cd_ptr = offset;
         let y_cd_ptr = offset + coord_bytes;
+        let low_word_init = if coord_bytes < 0x20 {
+            format!(
+                "\n                    mstore({:#x}, 0)\n                    mstore({:#x}, 0)",
+                x_ptr + 0x20,
+                y_ptr + 0x20
+            )
+        } else {
+            String::new()
+        };
         let code = format!(
             "
-        {{
-            mstore({x_ptr:#x}, 0)
-            mstore({:#x}, 0)
-            mstore({y_ptr:#x}, 0)
-            mstore({:#x}, 0)
-            calldatacopy({:#x}, {x_cd_ptr:#x}, {coord_bytes:#x})
-            calldatacopy({:#x}, {y_cd_ptr:#x}, {coord_bytes:#x})
-        }}",
-            x_ptr + 0x20,
-            y_ptr + 0x20,
+                {{
+                    mstore({x_ptr:#x}, 0)
+                    mstore({y_ptr:#x}, 0)
+                    {low_word_init}
+                    calldatacopy({:#x}, {x_cd_ptr:#x}, {coord_bytes:#x})
+                    calldatacopy({:#x}, {y_cd_ptr:#x}, {coord_bytes:#x})
+                }}",
             x_ptr + pad,
-            y_ptr + pad
+            y_ptr + pad,
+            low_word_init = low_word_init
         );
         self.code.borrow_mut().runtime_append(code);
         self.ec_point(Value::Memory(x_ptr))
@@ -211,47 +666,21 @@ impl EvmLoader {
         y_limbs: [&Scalar; LIMBS],
     ) -> EcPoint {
         let ptr = self.allocate(BLS_G1_BYTES);
-        let mut code = String::new();
-        let x_ptr = ptr;
-        code.push_str("let x_lo := 0\n");
-        code.push_str("let x_hi := 0\n");
-        for (idx, limb) in x_limbs.iter().enumerate() {
-            let limb_i = self.push(limb);
-            let shift = idx * BITS;
-            assert!(shift < 512, "limb decomposition exceeds 512 bits");
-            if shift < 256 {
-                code.push_str(format!("x_lo := add(x_lo, shl({shift}, {limb_i}))\n").as_str());
-            } else {
-                code.push_str(
-                    format!("x_hi := add(x_hi, shl({}, {limb_i}))\n", shift - 256).as_str(),
-                );
-            }
-        }
-        code.push_str(format!("mstore({x_ptr:#x}, x_hi)\n").as_str());
-        code.push_str(format!("mstore({:#x}, x_lo)\n", x_ptr + 0x20).as_str());
-
-        let y_ptr = ptr + BLS_ENCODED_FP_BYTES;
-        code.push_str("let y_lo := 0\n");
-        code.push_str("let y_hi := 0\n");
-        for (idx, limb) in y_limbs.iter().enumerate() {
-            let limb_i = self.push(limb);
-            let shift = idx * BITS;
-            assert!(shift < 512, "limb decomposition exceeds 512 bits");
-            if shift < 256 {
-                code.push_str(format!("y_lo := add(y_lo, shl({shift}, {limb_i}))\n").as_str());
-            } else {
-                code.push_str(
-                    format!("y_hi := add(y_hi, shl({}, {limb_i}))\n", shift - 256).as_str(),
-                );
-            }
-        }
-        code.push_str(format!("mstore({y_ptr:#x}, y_hi)\n").as_str());
-        code.push_str(format!("mstore({:#x}, y_lo)\n", y_ptr + 0x20).as_str());
+        let code = format!(
+            "{}{}",
+            self.pack_limbs_to_field_code::<LIMBS, BITS>(x_limbs, "x_lo", "x_hi", ptr),
+            self.pack_limbs_to_field_code::<LIMBS, BITS>(
+                y_limbs,
+                "y_lo",
+                "y_hi",
+                ptr + BLS_ENCODED_FP_BYTES
+            )
+        );
 
         let code = format!(
             "{{
-            {code}
-        }}"
+                    {code}
+                }}"
         );
         self.code.borrow_mut().runtime_append(code);
         self.ec_point(Value::Memory(ptr))
@@ -266,8 +695,8 @@ impl EvmLoader {
             let ptr = if let Some(ptr) = some_ptr {
                 ptr
             } else {
-                let v = self.push(&Scalar { loader: self.clone(), value });
                 let ptr = self.allocate(0x20);
+                let v = self.push(&Scalar { loader: self.clone(), value });
                 self.code.borrow_mut().runtime_append(format!("mstore({ptr:#x}, {v})"));
                 self.cache.borrow_mut().insert(identifier, ptr);
                 ptr
@@ -325,8 +754,7 @@ impl EvmLoader {
     }
 
     /// Allocates a new elliptic curve point and copies the given value into it.
-    pub fn dup_ec_point(self: &Rc<Self>, value: &EcPoint) -> EcPoint {
-        let ptr = self.allocate(BLS_G1_BYTES);
+    pub fn copy_ec_point(self: &Rc<Self>, value: &EcPoint, ptr: usize) {
         match value.value {
             Value::Memory(src_ptr) => {
                 let src_words = (0..(BLS_G1_BYTES / 0x20)).map(|idx| src_ptr + idx * 0x20);
@@ -337,8 +765,8 @@ impl EvmLoader {
                     .join("\n");
                 let code = format!(
                     "{{
-                    {stores}
-                }}"
+                            {stores}
+                        }}"
                 );
                 self.code.borrow_mut().runtime_append(code);
             }
@@ -346,58 +774,62 @@ impl EvmLoader {
                 unreachable!()
             }
         }
-        self.ec_point(Value::Memory(ptr))
     }
 
-    fn staticcall_with_lengths(
-        self: &Rc<Self>,
-        precompile: Precompiled,
-        cd_ptr: usize,
-        cd_len: usize,
-        rd_ptr: usize,
-        rd_len: usize,
-    ) {
-        // Shared staticcall emission for both fixed-size and runtime-sized precompile invocations.
-        let a = precompile as usize;
-        let code = format!("success := and(eq(staticcall(gas(), {a:#x}, {cd_ptr:#x}, {cd_len:#x}, {rd_ptr:#x}, {rd_len:#x}), 1), success)");
-        self.code.borrow_mut().runtime_append(code);
+    /// Allocates a new elliptic curve point and copies the given value into it.
+    pub fn dup_ec_point(self: &Rc<Self>, value: &EcPoint) -> EcPoint {
+        let ptr = self.allocate(BLS_G1_BYTES);
+        self.copy_ec_point(value, ptr);
+        self.ec_point(Value::Memory(ptr))
     }
 
     fn staticcall(self: &Rc<Self>, precompile: Precompiled, cd_ptr: usize, rd_ptr: usize) {
         let (cd_len, rd_len) = match precompile {
             Precompiled::BigModExp => (0xc0, 0x20),
-            Precompiled::Bls12_381G1Add => (2 * BLS_G1_BYTES, BLS_G1_BYTES),
             // We use G1MSM with a single pair: [G1 point (128 bytes) || scalar (32 bytes)].
             Precompiled::Bls12_381G1Msm => (BLS_G1_BYTES + 0x20, BLS_G1_BYTES),
             // 2 pairings in one call:
             //   [G1 (128) || G2 (256)] * 2 = 768 bytes
             Precompiled::Bls12_381Pairing => (2 * (BLS_G1_BYTES + BLS_G2_BYTES), 0x20),
         };
-        // Fixed-size precompile path delegates to the generic helper.
-        self.staticcall_with_lengths(precompile, cd_ptr, cd_len, rd_ptr, rd_len);
+        self.staticcall_sized(precompile as usize, cd_ptr, cd_len, rd_ptr, rd_len)
+    }
+
+    fn staticcall_sized(
+        self: &Rc<Self>,
+        precompile: usize,
+        cd_ptr: usize,
+        cd_len: usize,
+        rd_ptr: usize,
+        rd_len: usize,
+    ) {
+        let code = format!(
+            "success := and(eq(staticcall(gas(), {precompile:#x}, {cd_ptr:#x}, {cd_len:#x}, {rd_ptr:#x}, {rd_len:#x}), 1), success)"
+        );
+        self.code.borrow_mut().runtime_append(code);
+    }
+
+    fn inversion_modexp_input_ptr(self: &Rc<Self>) -> usize {
+        if let Some(ptr) = *self.invert_modexp_input_ptr.borrow() {
+            return ptr;
+        }
+
+        let ptr = self.allocate(0xc0);
+        self.emit_mstore_const(ptr, U256::from(0x20));
+        self.emit_mstore_const(ptr + 0x20, U256::from(0x20));
+        self.emit_mstore_const(ptr + 0x40, U256::from(0x20));
+        self.emit_mstore_const(ptr + 0x80, self.scalar_modulus - U256::from(2));
+        self.emit_mstore_const(ptr + 0xa0, self.scalar_modulus);
+        *self.invert_modexp_input_ptr.borrow_mut() = Some(ptr);
+        ptr
     }
 
     fn invert(self: &Rc<Self>, scalar: &Scalar) -> Scalar {
         let rd_ptr = self.allocate(0x20);
-        let [cd_ptr, ..] = [
-            &self.scalar(Value::Constant(U256::from(0x20))),
-            &self.scalar(Value::Constant(U256::from(0x20))),
-            &self.scalar(Value::Constant(U256::from(0x20))),
-            scalar,
-            &self.scalar(Value::Constant(self.scalar_modulus - U256::from(2))),
-            &self.scalar(Value::Constant(self.scalar_modulus)),
-        ]
-        .map(|value| self.dup_scalar(value).ptr());
-        self.staticcall(Precompiled::BigModExp, cd_ptr, rd_ptr);
+        let cd_ptr = self.inversion_modexp_input_ptr();
+        self.copy_scalar(scalar, cd_ptr + 0x60);
+        self.staticcall_sized(Precompiled::BigModExp as usize, cd_ptr, 0xc0, rd_ptr, 0x20);
         self.scalar(Value::Memory(rd_ptr))
-    }
-
-    #[allow(dead_code)]
-    fn ec_point_add(self: &Rc<Self>, lhs: &EcPoint, rhs: &EcPoint) -> EcPoint {
-        let rd_ptr = self.dup_ec_point(lhs).ptr();
-        self.dup_ec_point(rhs);
-        self.staticcall(Precompiled::Bls12_381G1Add, rd_ptr, rd_ptr);
-        self.ec_point(Value::Memory(rd_ptr))
     }
 
     fn ec_point_scalar_mul(self: &Rc<Self>, ec_point: &EcPoint, scalar: &Scalar) -> EcPoint {
@@ -428,8 +860,8 @@ impl EvmLoader {
             self.dup_scalar(scalar);
         }
         let rd_ptr = self.allocate(BLS_G1_BYTES);
-        self.staticcall_with_lengths(
-            Precompiled::Bls12_381G1Msm,
+        self.staticcall_sized(
+            Precompiled::Bls12_381G1Msm as usize,
             cd_ptr,
             cd_len,
             rd_ptr,
@@ -455,33 +887,18 @@ impl EvmLoader {
 
         let rd_ptr = self.dup_ec_point(lhs).ptr();
         self.allocate(BLS_G2_BYTES);
-        let g2_code = g2
-            .iter()
-            .enumerate()
-            .map(|(idx, word)| {
-                format!(
-                    "mstore({:#x}, {})",
-                    rd_ptr + BLS_G1_BYTES + idx * 0x20,
-                    hex_encode_u256(word)
-                )
-            })
-            .join("\n");
-        self.code.borrow_mut().runtime_append(g2_code);
+        for (idx, word) in g2.iter().enumerate() {
+            self.emit_mstore_const(rd_ptr + BLS_G1_BYTES + idx * 0x20, *word);
+        }
 
         self.dup_ec_point(rhs);
         self.allocate(BLS_G2_BYTES);
-        let minus_s_g2_code = minus_s_g2
-            .iter()
-            .enumerate()
-            .map(|(idx, word)| {
-                format!(
-                    "mstore({:#x}, {})",
-                    rd_ptr + (BLS_G1_BYTES + BLS_G2_BYTES) + BLS_G1_BYTES + idx * 0x20,
-                    hex_encode_u256(word)
-                )
-            })
-            .join("\n");
-        self.code.borrow_mut().runtime_append(minus_s_g2_code);
+        for (idx, word) in minus_s_g2.iter().enumerate() {
+            self.emit_mstore_const(
+                rd_ptr + (BLS_G1_BYTES + BLS_G2_BYTES) + BLS_G1_BYTES + idx * 0x20,
+                *word,
+            );
+        }
 
         self.staticcall(Precompiled::Bls12_381Pairing, rd_ptr, rd_ptr);
         let code = format!("success := and(eq(mload({rd_ptr:#x}), 1), success)");
@@ -761,24 +1178,10 @@ where
         };
 
         let ptr = self.allocate(BLS_G1_BYTES);
-        let code = format!(
-            "
-        {{
-            mstore({:#x}, {})
-            mstore({:#x}, {})
-            mstore({:#x}, {})
-            mstore({:#x}, {})
-        }}",
-            ptr,
-            hex_encode_u256(&x_words[0]),
-            ptr + 0x20,
-            hex_encode_u256(&x_words[1]),
-            ptr + BLS_ENCODED_FP_BYTES,
-            hex_encode_u256(&y_words[0]),
-            ptr + BLS_ENCODED_FP_BYTES + 0x20,
-            hex_encode_u256(&y_words[1]),
-        );
-        self.code.borrow_mut().runtime_append(code);
+        self.emit_mstore_const(ptr, x_words[0]);
+        self.emit_mstore_const(ptr + 0x20, x_words[1]);
+        self.emit_mstore_const(ptr + BLS_ENCODED_FP_BYTES, y_words[0]);
+        self.emit_mstore_const(ptr + BLS_ENCODED_FP_BYTES + 0x20, y_words[1]);
         self.ec_point(Value::Memory(ptr))
     }
 

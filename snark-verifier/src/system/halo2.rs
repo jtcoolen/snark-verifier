@@ -11,7 +11,7 @@ use crate::{
             distribute_powers as halo2_distribute_powers, l_active as halo2_l_active,
             l_blind as halo2_l_blind, l_last as halo2_l_last, rotation_last as halo2_rotation_last,
         },
-        layout::{permutation_chunk_count, remap_by_phase},
+        layout::{permutation_chunk_count, remap_by_phase_with_num_phase},
     },
     util::{
         arithmetic::{root_of_unity, CurveAffine, Domain, PrimeField, Rotation},
@@ -208,8 +208,18 @@ impl<'a, F: PrimeField> Polynomials<'a, F> {
             degree - 1
         };
 
-        let (num_advice, advice_index) = remap_by_phase(cs.advice_column_phase());
-        let (num_challenge, challenge_index) = remap_by_phase(cs.challenge_phase());
+        let advice_phase = cs.advice_column_phase();
+        let challenge_phase = cs.challenge_phase();
+        let num_phase = advice_phase
+            .iter()
+            .chain(challenge_phase.iter())
+            .max()
+            .copied()
+            .unwrap_or_default() as usize
+            + 1;
+        let (num_advice, advice_index) = remap_by_phase_with_num_phase(advice_phase, num_phase);
+        let (num_challenge, challenge_index) =
+            remap_by_phase_with_num_phase(challenge_phase, num_phase);
         assert_eq!(num_advice.iter().sum::<usize>(), cs.num_advice_columns());
         assert_eq!(num_challenge.iter().sum::<usize>(), cs.num_challenges());
 
@@ -754,4 +764,34 @@ fn instance_committing_key<'a, C: CurveAffine, P: Params<'a, C>>(
     };
 
     InstanceCommittingKey { bases, constant: Some(w) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::halo2_proofs::halo2curves::bls12_381::Fr;
+
+    #[test]
+    fn sparse_challenge_phases_do_not_shorten_phase_schedule() {
+        let mut cs = ConstraintSystem::<Fr>::default();
+        let advice_0 = cs.advice_column_in(FirstPhase);
+        let _advice_1 = cs.advice_column_in(SecondPhase);
+        let advice_2 = cs.advice_column_in(ThirdPhase);
+        let challenge_0 = cs.challenge_usable_after(FirstPhase);
+
+        cs.create_gate("phase-schedule", |meta| {
+            let a0 = meta.query_advice(advice_0, poly::Rotation::cur());
+            let a2 = meta.query_advice(advice_2, poly::Rotation::cur());
+            let c0 = meta.query_challenge(challenge_0);
+            Some((a0 + a2) * c0)
+        });
+
+        let polynomials = Polynomials::new(&cs, true, false, vec![], 1);
+        assert_eq!(polynomials.num_advice.len(), 3);
+        assert_eq!(
+            polynomials.num_challenge.len(),
+            polynomials.num_advice.len(),
+            "challenge schedule must preserve empty trailing advice phases"
+        );
+    }
 }
