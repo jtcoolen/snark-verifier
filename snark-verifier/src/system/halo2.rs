@@ -11,7 +11,7 @@ use crate::{
             distribute_powers as halo2_distribute_powers, l_active as halo2_l_active,
             l_blind as halo2_l_blind, l_last as halo2_l_last, rotation_last as halo2_rotation_last,
         },
-        layout::{permutation_chunk_count, remap_by_phase},
+        layout::{permutation_chunk_count, remap_by_phase_with_num_phase},
     },
     util::{
         arithmetic::{root_of_unity, CurveAffine, Domain, PrimeField, Rotation},
@@ -208,8 +208,18 @@ impl<'a, F: PrimeField> Polynomials<'a, F> {
             degree - 1
         };
 
-        let (num_advice, advice_index) = remap_by_phase(cs.advice_column_phase());
-        let (num_challenge, challenge_index) = remap_by_phase(cs.challenge_phase());
+        let advice_phase = cs.advice_column_phase();
+        let challenge_phase = cs.challenge_phase();
+        let num_phase = advice_phase
+            .iter()
+            .chain(challenge_phase.iter())
+            .max()
+            .copied()
+            .unwrap_or_default() as usize
+            + 1;
+        let (num_advice, advice_index) = remap_by_phase_with_num_phase(advice_phase, num_phase);
+        let (num_challenge, challenge_index) =
+            remap_by_phase_with_num_phase(challenge_phase, num_phase);
         assert_eq!(num_advice.iter().sum::<usize>(), cs.num_advice_columns());
         assert_eq!(num_challenge.iter().sum::<usize>(), cs.num_challenges());
 
