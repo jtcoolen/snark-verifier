@@ -755,3 +755,33 @@ fn instance_committing_key<'a, C: CurveAffine, P: Params<'a, C>>(
 
     InstanceCommittingKey { bases, constant: Some(w) }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::halo2_proofs::halo2curves::bls12_381::Fr;
+
+    #[test]
+    fn sparse_challenge_phases_do_not_shorten_phase_schedule() {
+        let mut cs = ConstraintSystem::<Fr>::default();
+        let advice_0 = cs.advice_column_in(FirstPhase);
+        let _advice_1 = cs.advice_column_in(SecondPhase);
+        let advice_2 = cs.advice_column_in(ThirdPhase);
+        let challenge_0 = cs.challenge_usable_after(FirstPhase);
+
+        cs.create_gate("phase-schedule", |meta| {
+            let a0 = meta.query_advice(advice_0, poly::Rotation::cur());
+            let a2 = meta.query_advice(advice_2, poly::Rotation::cur());
+            let c0 = meta.query_challenge(challenge_0);
+            Some((a0 + a2) * c0)
+        });
+
+        let polynomials = Polynomials::new(&cs, true, false, vec![], 1);
+        assert_eq!(polynomials.num_advice.len(), 3);
+        assert_eq!(
+            polynomials.num_challenge.len(),
+            polynomials.num_advice.len(),
+            "challenge schedule must preserve empty trailing advice phases"
+        );
+    }
+}
