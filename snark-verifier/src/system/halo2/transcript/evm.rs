@@ -566,6 +566,27 @@ mod tests {
     }
 
     #[test]
+    fn constant_absorption_after_squeeze_extends_transcript_buffer() {
+        let loader = EvmLoader::new::<Fq, Fr>();
+        let mut transcript = EvmTranscript::<G1Affine, Rc<EvmLoader>, _, _>::new(&loader);
+
+        let first = loader.scalar(Value::Constant(fe_to_u256(Fr::from(7u64))));
+        Transcript::common_scalar(&mut transcript, &first).unwrap();
+        assert_eq!(transcript.buf.len(), 0x20);
+
+        let _ = Transcript::squeeze_challenge(&mut transcript);
+        assert_eq!(transcript.buf.len(), 0x20);
+
+        let second = loader.scalar(Value::Constant(fe_to_u256(Fr::from(42u64))));
+        Transcript::common_scalar(&mut transcript, &second).unwrap();
+        assert_eq!(
+            transcript.buf.len(),
+            0x40,
+            "absorbing a scalar after squeeze must append to the running transcript bytes"
+        );
+    }
+
+    #[test]
     fn sharded_transcript_ir_contains_expected_equivalence_checks() {
         let scalar_0 = Fr::from(7u64);
         let scalar_1 = Fr::from(42u64);
