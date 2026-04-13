@@ -29,6 +29,7 @@ pub struct EvmTranscript<C: CurveAffine, L: Loader<C>, S, B> {
     loader: L,
     stream: S,
     buf: B,
+    seed_slot_active: bool,
     _marker: PhantomData<C>,
 }
 
@@ -43,7 +44,13 @@ where
         let ptr = loader.allocate(0x20);
         let mut buf = MemoryChunk::new(ptr);
         buf.extend(0x20);
-        Self { loader: loader.clone(), stream: 0, buf, _marker: PhantomData }
+        Self {
+            loader: loader.clone(),
+            stream: 0,
+            buf,
+            seed_slot_active: true,
+            _marker: PhantomData,
+        }
     }
 
     /// Load `num_instance` instances from calldata to memory.
@@ -67,6 +74,7 @@ where
             let ptr = self.loader.allocate(0x20);
             self.buf.reset(ptr);
             self.buf.extend(0x20);
+            self.seed_slot_active = true;
         }
 
         instances
@@ -109,23 +117,47 @@ where
 
         self.buf.reset(dup_hash_ptr);
         self.buf.extend(0x20);
+        self.seed_slot_active = false;
 
         self.loader.scalar(Value::Memory(challenge_ptr))
     }
 
     fn common_ec_point(&mut self, ec_point: &EcPoint) -> Result<(), Error> {
         if let Value::Memory(ptr) = ec_point.value() {
-            if self.buf.end() == ptr {
-                self.buf.extend(self.loader.evm_ec_point_bytes());
+            let point_ptr = if self.seed_slot_active {
+                if self.buf.end() == ptr {
+                    ptr
+                } else {
+                    let dst = self.loader.dup_ec_point(ec_point);
+                    if let Value::Memory(dst_ptr) = dst.value() {
+                        dst_ptr
+                    } else {
+                        unreachable!()
+                    }
+                }
             } else {
-                // Re-copy into the contiguous transcript buffer when source memory is disjoint.
-                let dst = self.loader.dup_ec_point(ec_point);
-                if let Value::Memory(dst_ptr) = dst.value() {
-                    assert_eq!(self.buf.end(), dst_ptr);
+                if self.buf.end() == ptr {
                     self.buf.extend(self.loader.evm_ec_point_bytes());
                 } else {
-                    unreachable!()
+                    // Re-copy into the contiguous transcript buffer when source memory is disjoint.
+                    let dst = self.loader.dup_ec_point(ec_point);
+                    if let Value::Memory(dst_ptr) = dst.value() {
+                        assert_eq!(self.buf.end(), dst_ptr);
+                        self.buf.extend(self.loader.evm_ec_point_bytes());
+                    } else {
+                        unreachable!()
+                    }
                 }
+                self.seed_slot_active = false;
+                return Ok(());
+            };
+
+            if self.seed_slot_active {
+                self.buf.reset(point_ptr);
+                self.buf.extend(self.loader.evm_ec_point_bytes());
+                self.seed_slot_active = false;
+            } else {
+                unreachable!()
             }
         } else {
             unreachable!()
@@ -135,27 +167,44 @@ where
 
     fn common_scalar(&mut self, scalar: &Scalar) -> Result<(), Error> {
         match scalar.value() {
-            Value::Constant(_) if self.buf.len() == 0x20 => {
+            Value::Constant(_) if self.seed_slot_active => {
                 self.loader.copy_scalar(scalar, self.buf.ptr());
+                self.seed_slot_active = false;
             }
             Value::Constant(_) => {
                 let ptr = self.loader.allocate(0x20);
                 assert_eq!(self.buf.end(), ptr);
                 self.loader.copy_scalar(scalar, ptr);
                 self.buf.extend(0x20);
+                self.seed_slot_active = false;
             }
             Value::Memory(ptr) => {
-                if self.buf.end() == ptr {
-                    self.buf.extend(0x20);
+                if self.seed_slot_active {
+                    if self.buf.end() == ptr {
+                        self.buf.reset(ptr);
+                        self.buf.extend(0x20);
+                    } else {
+                        let dst = self.loader.allocate(0x20);
+                        self.loader
+                            .code_mut()
+                            .runtime_append(format!("mstore({dst:#x}, mload({ptr:#x}))"));
+                        self.buf.reset(dst);
+                        self.buf.extend(0x20);
+                    }
                 } else {
-                    // Re-copy into the contiguous transcript buffer when source memory is disjoint.
-                    let dst = self.loader.allocate(0x20);
-                    assert_eq!(self.buf.end(), dst);
-                    self.loader
-                        .code_mut()
-                        .runtime_append(format!("mstore({dst:#x}, mload({ptr:#x}))"));
-                    self.buf.extend(0x20);
+                    if self.buf.end() == ptr {
+                        self.buf.extend(0x20);
+                    } else {
+                        // Re-copy into the contiguous transcript buffer when source memory is disjoint.
+                        let dst = self.loader.allocate(0x20);
+                        assert_eq!(self.buf.end(), dst);
+                        self.loader
+                            .code_mut()
+                            .runtime_append(format!("mstore({dst:#x}, mload({ptr:#x}))"));
+                        self.buf.extend(0x20);
+                    }
                 }
+                self.seed_slot_active = false;
             }
             _ => unreachable!(),
         }
@@ -190,7 +239,13 @@ where
     /// Initialize [`EvmTranscript`] given readable or writeable stream for
     /// verifying or proving with [`NativeLoader`].
     pub fn new(stream: S) -> Self {
-        Self { loader: NativeLoader, stream, buf: Vec::new(), _marker: PhantomData }
+        Self {
+            loader: NativeLoader,
+            stream,
+            buf: Vec::new(),
+            seed_slot_active: false,
+            _marker: PhantomData,
+        }
     }
 }
 
